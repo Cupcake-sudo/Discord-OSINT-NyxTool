@@ -67,7 +67,7 @@ Output will be large and takes longer depending on how active the user is. Bette
 |---|---|
 | `-heatmap` | Shows the top 5 two-hour windows when the target is most active |
 
-`-heatmap` can be added alongside `-messages` or `-all`. Timestamps are converted to your local timezone and saved as `heatmap.txt`. Not available with `-mentions`.
+`-heatmap` can be added alongside `-messages` or `-all`. Timestamps are converted to your local timezone and saved as `heatmap.txt`. Used for making a schedule and painting a picture of the users habits Not available with `-mentions`.
 
 ---
 
