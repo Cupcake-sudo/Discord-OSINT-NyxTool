@@ -38,8 +38,7 @@ Shows which users tag the target the most.
 
 <img width="1391" height="694" alt="asdads" src="https://github.com/user-attachments/assets/d73a9688-9321-4ee3-8fc4-2f6ad4756f33" />
 
-#What to look for?
-### This is a really old photo the target posted!
+### E.g #1!
 <img width="1125" height="2436" alt="blurry" src="https://github.com/user-attachments/assets/0618d6e5-e939-475c-b704-46bf1eb26750" />
 
 
