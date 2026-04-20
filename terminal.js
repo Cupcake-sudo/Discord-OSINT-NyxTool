@@ -197,18 +197,19 @@ async function printBanner() {
 '  ____  _________ __________  ____  ____ ',
 ' / __ \\/  _/ ___// ____/ __ \\/ __ \\/ __ \\',
 '/ / / // / \\__ \\/ /   / / / / /_/ / / / /',
-'/_____/___//____/\\____/\\____/_/ |_/_____/  ',
+'/_____/___//____/\\____/\\____/_/ |_/_____/',
 '',
 '        ____  _____ _____   ________',
 '       / __ \\/ ___//  _/ | / /_  __/',
 '      / / / /\\__ \\ / //  |/ / / /   ',
 '     / /_/ /___/ // // /|  / / /    ',
-'     \\____//____/___/_/ |_/ /_/    v2.1                  !By Cupcake',
+'     \\____//____/___/_/ |_/ /_/  v2.1  !By Cupcake',
   ];
 
   const cols     = process.stdout.columns || 80;
-  const maxLen   = bannerLines.reduce((m, l) => Math.max(m, l.length), 0);
-  const boxWidth = Math.min(maxLen + 2, cols - 4);
+  // bloated len
+  const maxLen   = bannerLines.reduce((m, l) => Math.max(m, l.trimEnd().length), 0);
+  const boxWidth = Math.min(maxLen + 4, cols - 4);
 
   await typeLine('  ╭' + '─'.repeat(boxWidth) + '╮', { charDelay: 2 });
 
@@ -216,11 +217,12 @@ async function printBanner() {
     if (line === '') {
       await typeLine('  │' + ' '.repeat(boxWidth) + '│', { charDelay: 0 });
     } else {
+      const trimmed    = line.trimEnd(); // ✅ measure the visible content only
       const innerWidth = boxWidth - 2;
-      const totalPad   = Math.max(0, innerWidth - line.length);
+      const totalPad   = Math.max(0, innerWidth - trimmed.length);
       const leftPad    = Math.floor(totalPad / 2);
       const rightPad   = totalPad - leftPad;
-      const padded     = ' '.repeat(leftPad) + line + ' '.repeat(rightPad);
+      const padded     = ' '.repeat(leftPad) + trimmed + ' '.repeat(rightPad);
       await typeLine('  │ ' + padded + ' │', { charDelay: 3 });
     }
   }
