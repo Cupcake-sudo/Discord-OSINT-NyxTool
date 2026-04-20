@@ -1,1 +1,8 @@
 node_modules/
+Everything_*/
+Messages_*/
+Files_*/
+Mentions_*/
+_tmp_*/
+*.txt
+*.json
