@@ -26,6 +26,10 @@ function moveCursor(row, col) {
   return '\x1b[' + row + ';' + col + 'H';
 }
 
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[^m]*m/g, '');
+}
+
 function clearScreen() {
   process.stdout.write(HIDE_CURSOR);
   process.stdout.write('\x1b[2J');
@@ -54,11 +58,14 @@ function updateHeader() {
   const col       = BANNER_COLOURS[_catFrame % BANNER_COLOURS.length];
   const maxMsgLen = Math.max(10, (process.stdout.columns || 80) - 20);
   const safeMsg   = String(_statusMsg).replace(/[\r\n]/g, ' ').slice(0, maxMsgLen);
+  const innerLen  = stripAnsi(c).length + safeMsg.length + 7;
+  const boxWidth  = Math.min(innerLen + 2, (process.stdout.columns || 80) - 4);
+
   process.stdout.write(
     SAVE_CURSOR +
-    moveCursor(_catLine, 1) +
-    CLEAR_LINE +
-    '  ' + col + c + RESET + '  ' + col + safeMsg + RESET +
+    moveCursor(_catLine, 1)     + CLEAR_LINE + col + '  ╭' + '─'.repeat(boxWidth) + '╮' + RESET +
+    moveCursor(_catLine + 1, 1) + CLEAR_LINE + '   ' + col + c + '  │  ' + safeMsg + RESET + ' ' +
+    moveCursor(_catLine + 2, 1) + CLEAR_LINE + col + '  ╰' + '─'.repeat(boxWidth) + '╯' + RESET +
     RESTORE_CURSOR
   );
   _catFrame++;
@@ -181,35 +188,45 @@ async function printResults(rows, folderPath) {
 
 async function printBanner() {
   const bannerLines = [
-    { text: '',                                                                               charDelay: 0 },
-    { text: '      _   _  __   __  _  _  ',                                                  charDelay: 4 },
-    { text: '     | \\ | | \\ \\ / / \\ \\/ / ',                                           charDelay: 4 },
-    { text: '     |  \\| |  \\ V /   >  <  ',                                               charDelay: 4 },
-    { text: '     | |\\  |   | |   / /\\ \\ ',                                              charDelay: 4 },
-    { text: '     |_| \\_|   |_|  /_/  \\_\\',                                              charDelay: 4 },
-    { text: '',                                                                               charDelay: 0 },
-    { text: '  ____  _________ __________  ____  ____ ',                                     charDelay: 3 },
-    { text: ' / __ \\/  _/ ___// ____/ __ \\/ __ \\/ __ \\',                               charDelay: 3 },
-    { text: '/ / / // / \\__ \\/ /   / / / / /_/ / / / /',                                 charDelay: 3 },
-    { text: '/_____/___//____/\\____/\\____/_/ |_/_____/  ',                                charDelay: 3 },
-    { text: '',                                                                               charDelay: 0 },
-    { text: '        ____  _____ _____   ________',                                          charDelay: 3 },
-    { text: '       / __ \\/ ___//  _/ | / /_  __/',                                        charDelay: 3 },
-    { text: '      / / / /\\__ \\ / //  |/ / / /   ',                                       charDelay: 3 },
-    { text: '     / /_/ /___/ // // /|  / / /    ',                                         charDelay: 3 },
-    { text: '     \\____//____/___/_/ |_/ /_/    v2.0                  -By Cupcake',         charDelay: 3 },
-    { text: '',                                                                               charDelay: 0 },
+'      _   _  __   __  _  _  ',
+'     | \\ | | \\ \\ / / \\ \\/ / ',
+'     |  \\| |  \\ V /   >  <  ',
+'     | |\\  |   | |   / /\\ \\ ',
+'     |_| \\_|   |_|  /_/  \\_\\',
+'',
+'  ____  _________ __________  ____  ____ ',
+' / __ \\/  _/ ___// ____/ __ \\/ __ \\/ __ \\',
+'/ / / // / \\__ \\/ /   / / / / /_/ / / / /',
+'/_____/___//____/\\____/\\____/_/ |_/_____/  ',
+'',
+'        ____  _____ _____   ________',
+'       / __ \\/ ___//  _/ | / /_  __/',
+'      / / / /\\__ \\ / //  |/ / / /   ',
+'     / /_/ /___/ // // /|  / / /    ',
+'     \\____//____/___/_/ |_/ /_/    v2.1                  !By Cupcake',
   ];
 
-  for (const { text, charDelay } of bannerLines) {
-    if (text === '') {
-      _outputLine++;
-      await delay(40);
+  const cols     = process.stdout.columns || 80;
+  const maxLen   = bannerLines.reduce((m, l) => Math.max(m, l.length), 0);
+  const boxWidth = Math.min(maxLen + 2, cols - 4);
+
+  await typeLine('  ╭' + '─'.repeat(boxWidth) + '╮', { charDelay: 2 });
+
+  for (const line of bannerLines) {
+    if (line === '') {
+      await typeLine('  │' + ' '.repeat(boxWidth) + '│', { charDelay: 0 });
     } else {
-      await typeLine(text, { charDelay });
+      const innerWidth = boxWidth - 2;
+      const totalPad   = Math.max(0, innerWidth - line.length);
+      const leftPad    = Math.floor(totalPad / 2);
+      const rightPad   = totalPad - leftPad;
+      const padded     = ' '.repeat(leftPad) + line + ' '.repeat(rightPad);
+      await typeLine('  │ ' + padded + ' │', { charDelay: 3 });
     }
   }
 
+  await typeLine('  ╰' + '─'.repeat(boxWidth) + '╯', { charDelay: 2 });
+  _outputLine++;
   await glitchType('~ sniffing discord', { charDelay: 4, glitches: 4 });
   lockCatBelowBanner();
 }
