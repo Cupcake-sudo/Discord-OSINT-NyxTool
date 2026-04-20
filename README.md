@@ -30,7 +30,7 @@ A command-line tool that searches between your Discord servers for messages, fil
 
 Shows which users tag the target the most.
 
-<img width="898" height="711" alt="Sniffing Mentions screenshot" src="https://github.com/user-attachments/assets/68a9c656-9b18-4362-b3bc-e4223dd23441" />
+<img width="1371" height="720" alt="260420_22h37m54s_screenshot" src="https://github.com/user-attachments/assets/fca97270-0966-4aeb-aabe-ec524e91c3cc" />
 
 ### Collecting Files & Heatmap
 
