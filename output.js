@@ -129,7 +129,7 @@ function writeMessagesOutput(outDir, filesDir, { finalUsername, allMessages, ser
   fs.writeFileSync(path.join(outDir, 'messages.txt'), txt);
 }
 
-function buildMessageRows(allMessages, serversWithMsgs, totalFiles) {
+function buildMessageRows(allMessages, serversWithMsgs, totalFiles, elapsed) {
   const rows = [];
   if (serversWithMsgs.length > 0) {
     const maxLen = Math.max(...serversWithMsgs.map((s) => s.server.length), 6);
@@ -146,10 +146,11 @@ function buildMessageRows(allMessages, serversWithMsgs, totalFiles) {
   } else {
     rows.push('  No messages found.');
   }
+  if (elapsed) rows.push('  Got ' + allMessages.length + ' message(s) in ' + elapsed);
   return rows;
 }
 
-function buildFilesOnlyRows(summary, totalFiles) {
+function buildFilesOnlyRows(summary, totalFiles, elapsed) {
   const serversWithFiles = summary.filter((s) => s.files.length > 0);
   const rows = [];
   if (serversWithFiles.length > 0) {
@@ -165,10 +166,11 @@ function buildFilesOnlyRows(summary, totalFiles) {
   } else {
     rows.push('  No files found.');
   }
+  if (elapsed) rows.push('  Got ' + totalFiles + ' file(s) in ' + elapsed);
   return rows;
 }
 
-function buildMentionRows(mentioners, serversWithMsgs, totalMentions) {
+function buildMentionRows(mentioners, serversWithMsgs, totalMentions, elapsed) {
   const top  = mentioners.slice(0, 5);
   const rows = [];
   if (top.length > 0) {
@@ -179,6 +181,7 @@ function buildMentionRows(mentioners, serversWithMsgs, totalMentions) {
   } else {
     rows.push('  No mentions found.');
   }
+  if (elapsed) rows.push('  Got ' + totalMentions + ' mention(s) in ' + elapsed);
   return rows;
 }
 
