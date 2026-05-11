@@ -36,6 +36,23 @@ let _serverCount   = 0;
 let _serverUnit    = '';
 let _serverMeta    = '';
 
+let _logBuffer     = [];
+let _bannerPrinted = false;
+
+const _BANNER_LINES = [
+  '▐ ▄  ▄· ▄▌▐▄• ▄',
+  '•█▌▐█▐█▪██▌ █▌█▌▪',
+  '▐█▐▐▌▐█▌▐█▪ ·██·',
+  '██▐█▌ ▐█▀·.▪▐█·█▌',
+  '▀▀ █▪  ▀ • •▀▀ ▀▀',
+  '',
+  '·▄▄▄▄  ▪  .▄▄ ·  ▄▄·       ▄▄▄  ·▄▄▄▄  ▄▄▄▄▄            ▄▄▌',
+  '██▪ ██ ██ ▐█ ▀. ▐█ ▌▪▪     ▀▄ █·██▪ ██ •██  ▪     ▪     ██•',
+  '▐█· ▐█▌▐█·▄▀▀▀█▄██ ▄▄ ▄█▀▄ ▐▀▀▄ ▐█· ▐█▌ ▐█.▪ ▄█▀▄  ▄█▀▄ ██▪',
+  '██. ██ ▐█▌▐█▄▪▐█▐███▌▐█▌.▐▌▐█•█▌██. ██  ▐█▌·▐█▌.▐▌▐█▌.▐▌▐█▌▐▌',
+  '▀▀▀▀▀• ▀▀▀ ▀▀▀▀ ·▀▀▀  ▀█▄▀▪.▀  ▀▀▀▀▀▀•  ▀▀▀  ▀█▄▀▪ ▀█▄▀▪.▀▀▀',
+];
+
 function moveCursor(row, col) {
   return '\x1b[' + row + ';' + col + 'H';
 }
@@ -95,7 +112,15 @@ function statusSet(msg) {
   _statusMsg = msg;
 }
 
+function _resetOutputTo(line) {
+  if (_catSepBelow !== null) {
+    _logBuffer.length = Math.max(0, line - (_catSepBelow + 1));
+  }
+  _outputLine = line;
+}
+
 function statusLog(msg) {
+  _logBuffer.push(msg);
   process.stdout.write(SAVE_CURSOR);
   process.stdout.write(moveCursor(_outputLine, 1));
   process.stdout.write(CLEAR_LINE);
@@ -134,7 +159,7 @@ function clearLinesFrom(fromLine) {
   for (let row = fromLine; row < _outputLine; row++) {
     process.stdout.write(SAVE_CURSOR + moveCursor(row, 1) + CLEAR_LINE + RESTORE_CURSOR);
   }
-  _outputLine = fromLine;
+  _resetOutputTo(fromLine);
 }
 
 function serverLogUpdate(count, meta) {
@@ -254,24 +279,10 @@ async function printResults(rows, folderPath) {
 }
 
 async function printBanner() {
-  const bannerLines = [
-    '▐ ▄  ▄· ▄▌▐▄• ▄',
-    '•█▌▐█▐█▪██▌ █▌█▌▪',
-    '▐█▐▐▌▐█▌▐█▪ ·██·',
-    '██▐█▌ ▐█▀·.▪▐█·█▌',
-    '▀▀ █▪  ▀ • •▀▀ ▀▀',
-    '',
-    '·▄▄▄▄  ▪  .▄▄ ·  ▄▄·       ▄▄▄  ·▄▄▄▄  ▄▄▄▄▄            ▄▄▌',
-    '██▪ ██ ██ ▐█ ▀. ▐█ ▌▪▪     ▀▄ █·██▪ ██ •██  ▪     ▪     ██•',
-    '▐█· ▐█▌▐█·▄▀▀▀█▄██ ▄▄ ▄█▀▄ ▐▀▀▄ ▐█· ▐█▌ ▐█.▪ ▄█▀▄  ▄█▀▄ ██▪',
-    '██. ██ ▐█▌▐█▄▪▐█▐███▌▐█▌.▐▌▐█•█▌██. ██  ▐█▌·▐█▌.▐▌▐█▌.▐▌▐█▌▐▌',
-    '▀▀▀▀▀• ▀▀▀ ▀▀▀▀ ·▀▀▀  ▀█▄▀▪.▀  ▀▀▀▀▀▀•  ▀▀▀  ▀█▄▀▪ ▀█▄▀▪.▀▀▀',
-  ];
-
   _bannerStartLine  = _outputLine;
   let colorIdx = 0;
 
-  for (const line of bannerLines) {
+  for (const line of _BANNER_LINES) {
     if (line === '') {
       _outputLine++;
       await delay(40);
@@ -297,6 +308,7 @@ async function printBanner() {
   process.stdout.write(SAVE_CURSOR + moveCursor(_outputLine, 1) + CLEAR_LINE + DIM + '─'.repeat(36) + RESET + RESTORE_CURSOR);
   _outputLine++;
   lockCatBelowBanner();
+  _bannerPrinted = true;
 }
 
 function _question(label) {
@@ -398,7 +410,7 @@ async function promptServerSelect(guilds) {
   for (let row = listStart; row <= _outputLine; row++) {
     process.stdout.write(SAVE_CURSOR + moveCursor(row, 1) + CLEAR_LINE + RESTORE_CURSOR);
   }
-  _outputLine = listStart;
+  _resetOutputTo(listStart);
 
   if (!ans.trim()) return guilds;
 
@@ -465,8 +477,59 @@ function finalizeOutput() {
   process.stdout.write('\n');
 }
 
+function _redrawAll() {
+  if (!_bannerPrinted || _flatOutput) return;
+
+  const savedBuffer  = _logBuffer.slice();
+  const serverActive = _serverLine !== null;
+
+  process.stdout.write('\x1b[2J');
+  _outputLine  = 1;
+  _logBuffer   = [];
+
+  let colorIdx = 0;
+  for (const line of _BANNER_LINES) {
+    if (line === '') { _outputLine++; continue; }
+    let built = '  ';
+    for (const ch of line) {
+      built += LOGO_COLOURS[colorIdx % LOGO_COLOURS.length] + ch + RESET;
+      colorIdx++;
+    }
+    process.stdout.write(moveCursor(_outputLine, 1) + CLEAR_LINE + built);
+    _outputLine++;
+  }
+
+  _outputLine++;
+  process.stdout.write(moveCursor(_outputLine, 1) + CLEAR_LINE + '~ HARVEST  ·  ANALYZE  ·  PROFILE ~');
+  _outputLine++;
+  process.stdout.write(moveCursor(_outputLine, 1) + CLEAR_LINE + DIM + '─'.repeat(36) + RESET);
+  _outputLine++;
+
+  _catSepAbove = _outputLine;
+  _catLine     = _outputLine + 1;
+  _catSepBelow = _outputLine + 2;
+  _outputLine += 3;
+  updateHeader();
+
+  for (const msg of savedBuffer) {
+    process.stdout.write(moveCursor(_outputLine, 1) + CLEAR_LINE + msg);
+    _outputLine++;
+  }
+  _logBuffer = savedBuffer;
+
+  if (serverActive) {
+    _serverLine    = _outputLine;
+    _serverSubLine = _outputLine + 1;
+    _outputLine   += 2;
+    _redrawServerLine(false);
+  }
+}
+
 process.on('exit', () => stopHeader());
 process.on('SIGINT', () => { stopHeader(); process.stdout.write('\n'); process.exit(0); });
+if (process.platform !== 'win32') {
+  process.on('SIGWINCH', () => _redrawAll());
+}
 
 module.exports = {
   clearScreen,
