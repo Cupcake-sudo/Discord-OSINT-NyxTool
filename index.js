@@ -92,25 +92,33 @@ async function main() {
 
   term.setCatMood('hunting');
 
-  term.statusSet('picking up the scent...');
-  const profile         = await resolveProfile(TARGET_USER_ID);
-  let resolvedUsername  = profile ? profile.tag : null;
-  let resolvedAvatar    = profile ? profile.avatar : null;
-  await term.delay(1500);
+  let profileShown = false;
 
-  if (resolvedUsername) {
-    term.statusLog('  target identified:  ' + resolvedUsername);
-    if (profile.displayName && profile.displayName !== profile.username) {
-      term.statusLog('  display name:        ' + profile.displayName);
+  async function showTargetProfile(usernameOverride) {
+    if (profileShown) return;
+    profileShown = true;
+    const prof = await resolveProfile(TARGET_USER_ID);
+    const tag  = prof ? prof.tag : (usernameOverride || null);
+    if (!tag) return;
+    term.statusLog('  target identified:  ' + tag);
+    if (prof && prof.displayName && prof.displayName !== prof.username) {
+      term.statusLog('  display name:        ' + prof.displayName);
     }
-    term.statusLog('  username:            ' + profile.username);
-    if (profile.createdAt) term.statusLog('  joined discord:      ' + formatSnowflakeDate(TARGET_USER_ID));
-    if (profile.bio) term.statusLog('  bio:                 ' + profile.bio.replace(/\n/g, ' ').slice(0, 80));
-    if (profile.mutualFriendsCount !== null) term.statusLog('  mutual friends:      ' + profile.mutualFriendsCount);
-    if (profile.mutualGuilds && profile.mutualGuilds.length > 0) {
-      term.statusLog('  mutual servers:      ' + profile.mutualGuilds.length);
+    if (prof) term.statusLog('  username:            ' + prof.username);
+    term.statusLog('  joined discord:      ' + formatSnowflakeDate(TARGET_USER_ID));
+    if (prof && prof.bio) term.statusLog('  bio:                 ' + prof.bio.replace(/\n/g, ' ').slice(0, 80));
+    if (prof && prof.mutualFriendsCount !== null) term.statusLog('  mutual friends:      ' + prof.mutualFriendsCount);
+    if (prof && prof.mutualGuilds && prof.mutualGuilds.length > 0) {
+      term.statusLog('  mutual servers:      ' + prof.mutualGuilds.length);
     }
+    return prof;
   }
+
+  term.statusSet('picking up the scent...');
+  const profile        = await showTargetProfile(null);
+  let resolvedUsername = profile ? profile.tag : null;
+  let resolvedAvatar   = profile ? profile.avatar : null;
+  await term.delay(1500);
 
   const tmpDir = '_tmp_' + TARGET_USER_ID;
   if (DOWNLOAD_FILES && !MENTION_ONLY_MODE && !fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
@@ -145,10 +153,10 @@ async function main() {
     term.serverLogStart(mode, name, unit);
 
     if (MENTION_ONLY_MODE) {
-      const mentions = await searchGuildForMentions(guild.id, guild.name, (username) => {
+      const mentions = await searchGuildForMentions(guild.id, guild.name, async (username) => {
         if (!resolvedUsername) {
           resolvedUsername = username;
-          term.statusLog('  target identified: ' + resolvedUsername);
+          await showTargetProfile(username);
         }
       }, (count, meta) => term.serverLogUpdate(count, meta));
       allMentions.push(...mentions);
@@ -157,17 +165,17 @@ async function main() {
     } else {
       let msgs;
       if (FILES_ONLY_MODE) {
-        msgs = await searchGuildForFiles(guild.id, guild.name, tmpDir, (username) => {
+        msgs = await searchGuildForFiles(guild.id, guild.name, tmpDir, async (username) => {
           if (!resolvedUsername) {
             resolvedUsername = username;
-            term.statusLog('  target identified: ' + resolvedUsername);
+            await showTargetProfile(username);
           }
         }, (count, meta) => term.serverLogUpdate(count, meta));
       } else {
-        msgs = await searchGuildForUser(guild.id, guild.name, tmpDir, (username) => {
+        msgs = await searchGuildForUser(guild.id, guild.name, tmpDir, async (username) => {
           if (!resolvedUsername) {
             resolvedUsername = username;
-            term.statusLog('  target identified: ' + resolvedUsername);
+            await showTargetProfile(username);
           }
         }, (count, meta) => term.serverLogUpdate(count, meta));
       }
@@ -178,10 +186,10 @@ async function main() {
       if (MODE_ALL) {
         term.serverLogDone();
         term.serverLogStart('Mentions', name, 'mentions');
-        guildMentions = await searchGuildForMentions(guild.id, guild.name, (username) => {
+        guildMentions = await searchGuildForMentions(guild.id, guild.name, async (username) => {
           if (!resolvedUsername) {
             resolvedUsername = username;
-            term.statusLog('  target identified: ' + resolvedUsername);
+            await showTargetProfile(username);
           }
         }, (count, meta) => term.serverLogUpdate(count, meta));
         allMentions.push(...guildMentions);

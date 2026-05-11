@@ -74,15 +74,12 @@ async function searchGuildForMentions(guildId, guildName, onTargetResolved, onPr
       if (!pageOldestId || BigInt(msg.id) < BigInt(pageOldestId)) pageOldestId = msg.id;
 
       const senderTag      = formatUserTag(msg.author);
-      const mentionedUsers = (msg.mentions || [])
-        .filter((u) => u.id === constants.TARGET_USER_ID)
-        .map((u) => {
-          if (!targetResolved) {
-            const tag = formatUserTag(u);
-            if (tag) { onTargetResolved(tag); targetResolved = true; }
-          }
-          return { id: u.id, tag: formatUserTag(u), avatar: u.avatar || null };
-        });
+      const rawMentions    = (msg.mentions || []).filter((u) => u.id === constants.TARGET_USER_ID);
+      if (!targetResolved && rawMentions.length > 0) {
+        const tag = formatUserTag(rawMentions[0]);
+        if (tag) { await onTargetResolved(tag); targetResolved = true; }
+      }
+      const mentionedUsers = rawMentions.map((u) => ({ id: u.id, tag: formatUserTag(u), avatar: u.avatar || null }));
 
       const channelObj = (msg.channel && msg.channel.name) ? msg.channel : (channelMap[msg.channel_id] || null);
       collected.push({
@@ -176,7 +173,7 @@ async function searchGuildForFiles(guildId, guildName, filesDir, onFirstAuthor, 
 
       if (!authorSent && msg.author && msg.author.id === constants.TARGET_USER_ID) {
         const name = extractUsernameFromMessage(msg);
-        if (name) { onFirstAuthor(name); authorSent = true; }
+        if (name) { await onFirstAuthor(name); authorSent = true; }
       }
 
       const fileUrls   = extractFileUrls(msg);
@@ -290,7 +287,7 @@ async function searchGuildForUser(guildId, guildName, filesDir, onFirstAuthor, o
 
       if (!authorSent && msg.author && msg.author.id === constants.TARGET_USER_ID) {
         const name = extractUsernameFromMessage(msg);
-        if (name) { onFirstAuthor(name); authorSent = true; }
+        if (name) { await onFirstAuthor(name); authorSent = true; }
       }
 
       const fileUrls   = extractFileUrls(msg);
