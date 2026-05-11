@@ -1,61 +1,36 @@
-# Discord OSINT Nyx-Tool — v2.0
+# Discord OSINT — Nyx
 
 **By Cupcake**
 
 ![Node.js](https://img.shields.io/badge/node-%3E%3D16.0.0-brightgreen) ![License](https://img.shields.io/github/license/Cupcake-sudo/Discord-OSINT) ![JavaScript](https://img.shields.io/badge/language-JavaScript-yellow)
 
-A command-line tool that searches between your Discord servers for messages, files, and mentions tied to a specific user ID. Based around a kitty pet named Nyx who tells you everything that is happening.
+A terminal-based OSINT tool that sweeps your shared Discord servers for messages, files, and mentions tied to a target user ID. Guided by a cat named Nyx.
 
-> ⚠️ **Disclaimer:** This tool is intended for use on accounts you own or have explicit permission to investigate. Use responsibly and in accordance with Discord’s Terms of Service.
+> ⚠️ **Disclaimer:** Only use this on accounts you own or have explicit permission to investigate. Use responsibly and in accordance with Discord's Terms of Service.
 
------
+---
 
 ## Table of Contents
 
-- [Screenshots](#screenshots)
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Modes](#modes)
-- [Options](#options)
-- [Examples](#examples)
+- [Viewer](#viewer)
 - [Output](#output)
 - [Notes](#notes)
 
------
-
-## Screenshots
-
-### Sniffing Mentions
-
-Shows which users tag the target the most.
-
-<img width="1371" height="720" alt="260420_22h37m54s_screenshot" src="https://github.com/user-attachments/assets/fca97270-0966-4aeb-aabe-ec524e91c3cc" />
-
-### Collecting Files & Heatmap
-
-`-files` collects only files. `-heatmap` shows the time windows where most messages are sent.
-
-<img width="1391" height="694" alt="asdads" src="https://github.com/user-attachments/assets/d73a9688-9321-4ee3-8fc4-2f6ad4756f33" />
-
-### E.g #1!
-<img width="1125" height="2436" alt="blurry" src="https://github.com/user-attachments/assets/0618d6e5-e939-475c-b704-46bf1eb26750" />
-
-
-
------
+---
 
 ## Requirements
 
 - [Node.js](https://nodejs.org) v16 or higher
 
-Check if you have it:
-
 ```bash
 node -v
 ```
 
------
+---
 
 ## Installation
 
@@ -63,75 +38,110 @@ node -v
 npm install
 ```
 
------
+Optionally create a `.env` file to skip the token prompt on every run:
+
+```
+Token=your_discord_token_here
+```
+
+---
 
 ## Usage
 
 ```bash
-node index.js -id <userID> [mode] [options]
+node index.js
 ```
 
-You will be prompted to paste your Discord token after launch.
+Everything is interactive. You will be walked through:
 
-> **Finding a user ID:** Enable Developer Mode in Discord settings, then right-click any username and select **Copy User ID**.
+1. **Token** — paste your Discord user token (skipped if `.env` is set)
+2. **Target ID** — the user ID to investigate
+3. **Server selection** — pick specific servers by number (`1,2,3`) or press Enter to scan all
+4. **Mode** — choose what to collect
+5. **Heatmap** — optional activity breakdown by hour
+6. **Browser viewer** — open results in a local web UI when done
 
------
+> **Finding a user ID:** Enable Developer Mode in Discord settings → right-click any username → **Copy User ID**.
+
+---
 
 ## Modes
 
-|Flag       |Description                                                                      |
-|-----------|---------------------------------------------------------------------------------|
-|*(none)*   |Same as `-messages`                                                              |
-|`-messages`|Saves every message the target sent across all shared servers                    |
-|`-files`   |Downloads only messages with attachments — images, videos, documents             |
-|`-mentions`|Finds every message where the target was pinged and ranks who sends them the most|
-|`-all`     |Runs everything at once — messages, files, and mentions in one pass              |
+| # | Mode | Description |
+|---|------|-------------|
+| 1 | **Messages** | Every message the target sent across selected servers |
+| 2 | **Files** | Only messages with attachments — images, videos, documents |
+| 3 | **Mentions** | Every message where the target was pinged, ranked by who sends them most |
+| 4 | **All** | Messages + files + mentions in one pass |
 
-### `-messages`
+### Messages
 
-Good starting point. Text only, fast, and easy to read through.
+Good starting point. Text only, fast, easy to read through.
 
-### `-files`
+### Files
 
-Files shared on Discord rarely have metadata stripped, so what you download is often what was uploaded straight from the device. Useful to run on its own when that angle matters. Output stays clean and focused.
+Files shared on Discord rarely have metadata stripped — what you download is often straight from the device. Output is focused and clean.
 
-### `-mentions`
+### Mentions
 
-Builds a ranked list of who interacts with the target the most. A solid pivot point for going deeper — useful for mapping out connections and figuring out who to look into next.
+Builds a ranked list of who interacts with the target the most. A solid pivot point for mapping connections and deciding who to look into next.
 
-### `-all`
+### All
 
-Output will be large and takes longer depending on how active the user is. Better to sort through afterward than to run each mode separately if you want the full picture in one go.
+Runs everything in one pass. Mentions are collected alongside messages so you get the full picture without running separate scans. Takes longer depending on activity level.
 
------
+---
 
-## Options
+## Heatmap
 
-|Flag      |Description                                                    |
-|----------|---------------------------------------------------------------|
-|`-heatmap`|Shows the top 5 two-hour windows when the target is most active|
+Available with **Messages** and **All** modes. Shows the top 5 most active 1-hour windows in your local timezone, plus a full 24-hour breakdown saved to `heatmap.txt`. Useful for profiling habits and daily schedule.
 
-`-heatmap` can be added alongside `-messages` or `-all`. Timestamps are converted to your local timezone and saved as `heatmap.txt`. Useful for building a picture of the user’s habits and daily schedule. Not available with `-mentions`.
+Times are displayed in AM/PM format.
 
------
+---
 
-## Examples
+## Viewer
+
+When a scan completes, you can open results in a local browser. The viewer includes:
+
+- **Filter bar** — filter by All / Messages / Files / Mentions
+- **File type filters** — images, videos, audio, other
+- **OSINT Intel** — six automatic detection categories that scan message content and highlight matched phrases:
+  - `location` — cities, countries, addresses, travel
+  - `economics` — salary, job, money, investments
+  - `identity` — name, birthday, email, phone, accounts
+  - `social` — relationships, family, social media handles
+  - `activities` — gym, gaming, school, daily routines
+  - `technical` — hardware, OS, IP, hosting, shell
+
+  Each matched message shows colored category badges. Clicking a badge or the filter button highlights the specific terms that triggered it.
+
+- **Ranked Mentioners sidebar** — click any user to filter the mentions feed to only their messages
+- **Jump links** — open the original message in Discord
+
+### Re-open saved results
 
 ```bash
-# Gather all messages
-node index.js -id 123456789012345678 -messages
-
-# Files only
-node index.js -id 123456789012345678 -files
-
-# Map out who mentions them the most
-node index.js -id 123456789012345678 -mentions
-
-# Full sweep with activity heatmap
-node index.js -id 123456789012345678 -all -heatmap
+node index.js --view
 ```
 
------
+Picks up any output folder automatically. Pass a folder name to open a specific one:
+
+```bash
+node index.js --view Everything_username
+```
+
+### Browse a raw file folder
+
+If a scan was interrupted before writing JSON (e.g. a `_tmp_` folder), the viewer falls back to a file browser:
+
+```bash
+node index.js --view _tmp_123456789
+```
+
+Shows images, videos, and audio in a paginated grid with type filters.
+
+---
 
 ## Output
 
@@ -144,11 +154,20 @@ Mentions_username/
 Everything_username/
 ```
 
-Each folder contains a plain text report and a JSON file. Downloaded files go into a `files/` subfolder.
+| File | Contents |
+|------|----------|
+| `messages.json` | Full message data |
+| `messages.txt` | Human-readable report |
+| `mentions.json` | Mention data with ranked senders |
+| `mentions.txt` | Human-readable mention report |
+| `heatmap.txt` | Hourly activity breakdown |
+| `files/` | Downloaded attachments |
 
------
+---
 
 ## Notes
 
-- Rate limits are handled automatically. If Discord throttles the tool, it will wait and resume on its own.
+- Rate limits are handled automatically — the tool will wait and resume without losing progress.
 - The token prompt hides input. Paste and press Enter.
+- Server selection lets you narrow a scan to one or a few servers, which is faster and useful for targeted investigations.
+- The OSINT wordlists live in `wordlists.js` and can be edited to add or remove detection terms.

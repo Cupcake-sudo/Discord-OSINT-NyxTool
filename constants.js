@@ -1,7 +1,10 @@
 const HAS_FILTERS        = ['image', 'video', 'file', 'embed', 'sticker', 'sound'];
 const SYSTEM_TZ          = Intl.DateTimeFormat().resolvedOptions().timeZone;
-const SEARCH_DELAY_MS    = 1500;
-const RATE_LIMIT_WAIT_MS = 150000;
+const SEARCH_DELAY_MIN_MS  = 3000;
+const SEARCH_DELAY_MAX_MS  = 4500;
+const SERVER_DELAY_MIN_MS  = 1000;
+const SERVER_DELAY_MAX_MS  = 2000;
+const RATE_LIMIT_WAIT_MS   = 180000;
 const PAGE_SIZE          = 25;
 
 const HIDE_CURSOR    = '\x1b[?25l';
@@ -16,7 +19,7 @@ const CAT_FACES = {
   hunting: ['(=^ ⊙ω⊙ ^=)', '(=^ ◈ω◈ ^=)', '(=^ ◉ω◉ ^=)', '(=^ ✧ω✧ ^=)'],
   eating:  ['(=^ >ω< ^=)', '(=^ ꒰꒱ ^=)', '(=^ ᗒᗨᗕ ^=)', '(=^ NOM  ^=)'],
   sad:     ['(=^ ;ω; ^=)', '(=^ T_T ^=)', '(=^ ╥ω╥ ^=)', '(=^ u_u ^=)'],
-  sleepy:  ['(=^ -ω- ^=)', '(=^ ˘ω˘ ^=)', '(=^ ᴖωᴖ ^=)', '(=^ zzZ  ^=)'],
+  sleepy:  ['(=^ -ω- ^=)  z', '(=^ -ω- ^=)  zz', '(=^ -ω- ^=)  zzZ', '(=^ -ω- ^=)  zzZZ'],
   happy:   ['(=^ ≧ω≦ ^=)', '(=^ ^ω^ ^=)', '(=^ ᵔωᵔ ^=)', '(=^ ♡ω♡ ^=)'],
 };
 const CAT_FRAMES = CAT_FACES.idle;
@@ -48,10 +51,13 @@ const EXT_BUCKETS = {
 
 const m = module.exports;
 
-m.HAS_FILTERS        = HAS_FILTERS;
-m.SYSTEM_TZ          = SYSTEM_TZ;
-m.SEARCH_DELAY_MS    = SEARCH_DELAY_MS;
-m.RATE_LIMIT_WAIT_MS = RATE_LIMIT_WAIT_MS;
+m.HAS_FILTERS         = HAS_FILTERS;
+m.SYSTEM_TZ           = SYSTEM_TZ;
+m.SEARCH_DELAY_MIN_MS = SEARCH_DELAY_MIN_MS;
+m.SEARCH_DELAY_MAX_MS = SEARCH_DELAY_MAX_MS;
+m.SERVER_DELAY_MIN_MS = SERVER_DELAY_MIN_MS;
+m.SERVER_DELAY_MAX_MS = SERVER_DELAY_MAX_MS;
+m.RATE_LIMIT_WAIT_MS  = RATE_LIMIT_WAIT_MS;
 m.PAGE_SIZE          = PAGE_SIZE;
 m.HIDE_CURSOR        = HIDE_CURSOR;
 m.SHOW_CURSOR        = SHOW_CURSOR;

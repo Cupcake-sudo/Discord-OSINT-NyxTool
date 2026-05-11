@@ -1,6 +1,7 @@
-const http = require('http');
-const fs   = require('fs');
-const path = require('path');
+const http            = require('http');
+const fs              = require('fs');
+const path            = require('path');
+const INTEL_WORDLISTS = require('./wordlists');
 
 const MIME = {
   '.png':  'image/png',
@@ -111,10 +112,11 @@ function renderMessageCard(m, opts) {
   const av        = opts.mode === 'mentions' ? m.senderAvatar : (m.authorAvatar || opts.targetAvatar);
   const discrim   = opts.mode === 'mentions' ? m.senderDiscriminator : null;
   const avSrc     = id ? avatarUrl(id, av, discrim) : null;
-  const dataHas   = messageDataHas(m);
+  const dataHas    = messageDataHas(m);
+  const senderAttr = opts.mode === 'mentions' ? ' data-sender="' + escapeHtml(id || '') + '"' : '';
 
   const parts = [];
-  parts.push('<article class="msg" data-has="' + dataHas + '">');
+  parts.push('<article class="msg" data-has="' + dataHas + '"' + senderAttr + '>');
   parts.push('  <div class="msg-head">');
   if (avSrc) {
     parts.push('    <img class="av" src="' + escapeHtml(avSrc) + '" alt="">');
@@ -167,15 +169,38 @@ function renderMentioners(mentioners, targetId) {
   if (!mentioners || !mentioners.length) return '';
   const rows = mentioners.map((u) => {
     const av = avatarUrl(u.id, u.avatar, null);
-    return '<li><img src="' + escapeHtml(av) + '" alt=""><span class="t">' + escapeHtml(u.tag || u.id) + '</span><span class="n">' + u.count + '×</span></li>';
+    return '<li data-id="' + escapeHtml(u.id) + '"><img src="' + escapeHtml(av) + '" alt=""><span class="t">' + escapeHtml(u.tag || u.id) + '</span><span class="n">' + u.count + '×</span></li>';
   }).join('');
   return '<aside class="rank"><h3>RANKED MENTIONERS</h3><ol>' + rows + '</ol></aside>';
 }
 
-function buildHTML(data, mode) {
+const PAGE_SIZE = 500;
+
+
+function filterByIntel(items, category) {
+  const terms = INTEL_WORDLISTS[category] || [];
+  return items.filter((m) => {
+    const text = (m.content || '').toLowerCase();
+    return terms.some((t) => text.includes(t));
+  });
+}
+
+function buildHTML(data, mode, page, intelFilter, mentionsData) {
+  page = page || 0;
   const isMentions = mode === 'mentions';
-  const items      = isMentions ? data.mentions : data.messages;
-  const grouped    = groupByServer(items || []);
+  let allItems     = (isMentions ? data.mentions : data.messages) || [];
+
+  if (intelFilter && INTEL_WORDLISTS[intelFilter]) {
+    allItems = filterByIntel(allItems, intelFilter);
+  }
+
+  const totalCount = allItems.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const safePage   = Math.max(0, Math.min(page, totalPages - 1));
+  const startIdx   = safePage * PAGE_SIZE;
+  const endIdx     = Math.min(startIdx + PAGE_SIZE, totalCount);
+  const items      = (allItems || []).slice(startIdx, endIdx);
+  const grouped    = groupByServer(items);
   const targetAv   = data.targetAvatar
     ? avatarUrl(data.userId, data.targetAvatar, null)
     : avatarUrl(data.userId, null, null);
@@ -199,128 +224,50 @@ function buildHTML(data, mode) {
     sectionParts.push('</section>');
   }
 
+  let mentionFeedHtml = '';
+  let mentionRankHtml = '';
+  const hasMentionsFeed = !isMentions && mentionsData && (mentionsData.mentions || []).length > 0;
+  if (hasMentionsFeed) {
+    const mg = groupByServer(mentionsData.mentions || []);
+    const mp = [];
+    for (const sv of Object.keys(mg).sort()) {
+      mp.push('<section class="srv"><h2>' + escapeHtml(sv) + '</h2>');
+      for (const ch of Object.keys(mg[sv]).sort()) {
+        const list = mg[sv][ch];
+        mp.push('<div class="chan"><div class="chan-head"><span class="ch">' + escapeHtml(ch) + '</span><span class="cn">' + list.length + ' mention' + (list.length === 1 ? '' : 's') + '</span></div>');
+        for (const m of list) {
+          mp.push(renderMessageCard(m, { mode: 'mentions', targetId: data.userId, targetTag: data.username, targetAvatar: data.targetAvatar }));
+        }
+        mp.push('</div>');
+      }
+      mp.push('</section>');
+    }
+    mentionFeedHtml = mp.join('\n');
+    mentionRankHtml = renderMentioners(mentionsData.mentioners || [], data.userId);
+  }
+
   const totalLine = isMentions
-    ? (data.total + ' mentions  ·  ' + (data.mentioners ? data.mentioners.length : 0) + ' unique senders')
-    : (data.total + ' messages  ·  ' + (items || []).reduce((n, m) => n + (m.files ? m.files.length : 0), 0) + ' files');
+    ? (totalCount + ' mentions  ·  ' + (data.mentioners ? data.mentioners.length : 0) + ' unique senders')
+    : (totalCount + ' messages  ·  ' + (allItems || []).reduce((n, m) => n + (m.files ? m.files.length : 0), 0) + ' files');
 
-  const css = `
-    :root{
-      --bg:#0e1116; --panel:#141921; --panel-2:#1a2029;
-      --line:#2a313c; --line-soft:#1f2530;
-      --ink:#e6e8ec; --ink-soft:#a6acb8; --ink-mute:#6b7280;
-      --target:#a78bfa; --link:#7dd3fc; --warn:#f59e0b;
-      --mono:'JetBrains Mono','Menlo','Consolas','SF Mono',monospace;
-    }
-    *{box-sizing:border-box}
-    html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--mono);font-size:13.5px;line-height:1.55}
-    a{color:var(--link);text-decoration:none}
-    a:hover{text-decoration:underline}
+  const intelParam = intelFilter ? '&intel=' + intelFilter : '';
+  const prevBtn = safePage > 0
+    ? '<a class="pbtn" href="/?page=' + (safePage - 1) + intelParam + '">‹ prev</a>'
+    : '<span class="pbtn disabled">‹ prev</span>';
+  const nextBtn = safePage < totalPages - 1
+    ? '<a class="pbtn" href="/?page=' + (safePage + 1) + intelParam + '">next ›</a>'
+    : '<span class="pbtn disabled">next ›</span>';
+  const clearIntel = intelFilter
+    ? '  <a class="pbtn" href="/?page=0" style="border-color:#f87171;color:#f87171">✕ clear ' + intelFilter + '</a>'
+    : '';
+  const pagerBlock = (totalPages > 1 || intelFilter)
+    ? '<div class="pager">' + prevBtn +
+      '<span class="pinfo">page ' + (safePage + 1) + ' of ' + totalPages +
+      '  ·  ' + (startIdx + 1) + '–' + endIdx + ' of ' + totalCount + (intelFilter ? ' matching' : '') + '</span>' +
+      nextBtn + clearIntel + '</div>'
+    : '';
 
-    .frame{max-width:1180px;margin:0 auto;padding:28px 24px 80px}
-
-    .top{
-      border:1px solid var(--line); background:var(--panel);
-      padding:18px 22px; position:relative; margin-bottom:22px;
-    }
-    .top::before{content:'';position:absolute;left:-1px;top:-1px;width:14px;height:14px;border-top:1px solid var(--target);border-left:1px solid var(--target)}
-    .top::after{content:'';position:absolute;right:-1px;bottom:-1px;width:14px;height:14px;border-bottom:1px solid var(--target);border-right:1px solid var(--target)}
-
-    .stamp{font-size:10.5px;color:var(--ink-mute);letter-spacing:.22em;margin-bottom:10px}
-    .stamp .sep{margin:0 10px;color:var(--line)}
-
-    .target{display:flex;align-items:center;gap:16px}
-    .target img{width:64px;height:64px;border-radius:2px;border:1px solid var(--line);background:var(--panel-2)}
-    .target h1{margin:0 0 4px;font-size:20px;letter-spacing:.04em;color:var(--ink)}
-    .target h1 .at{color:var(--target)}
-    .target .id{font-size:12px;color:var(--ink-mute)}
-    .target .id b{color:var(--ink-soft);font-weight:normal}
-
-    .stats{display:flex;gap:0;border:1px solid var(--line);background:var(--panel);margin-bottom:22px}
-    .stats div{flex:1;padding:12px 18px;border-right:1px solid var(--line)}
-    .stats div:last-child{border-right:0}
-    .stats .k{font-size:10.5px;color:var(--ink-mute);letter-spacing:.18em;text-transform:uppercase}
-    .stats .v{font-size:16px;color:var(--ink);margin-top:2px}
-
-    .layout{display:grid;grid-template-columns: 1fr; gap:22px}
-    .layout.has-rank{grid-template-columns: 1fr 280px}
-
-    .rank{border:1px solid var(--line);background:var(--panel);padding:14px 16px;align-self:start;position:sticky;top:20px}
-    .rank h3{margin:0 0 10px;font-size:11px;color:var(--ink-mute);letter-spacing:.22em}
-    .rank ol{list-style:none;padding:0;margin:0;counter-reset:rk}
-    .rank li{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line-soft);counter-increment:rk}
-    .rank li:last-child{border-bottom:0}
-    .rank li::before{content:counter(rk,decimal-leading-zero);color:var(--ink-mute);font-size:11px;width:22px}
-    .rank li img{width:22px;height:22px;border-radius:50%;background:var(--panel-2)}
-    .rank li .t{flex:1;font-size:12.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-    .rank li .n{color:var(--target);font-size:12px}
-
-    .srv{margin-bottom:30px}
-    .srv h2{
-      margin:0 0 12px;font-size:11px;letter-spacing:.28em;color:var(--ink-mute);
-      border-bottom:1px solid var(--line);padding-bottom:8px;text-transform:uppercase;
-    }
-    .chan{margin:0 0 18px;border-left:1px solid var(--line-soft);padding-left:14px}
-    .chan-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
-    .chan-head .ch{color:var(--ink-soft);font-size:13px}
-    .chan-head .cn{color:var(--ink-mute);font-size:11px;letter-spacing:.12em}
-
-    .msg{
-      border:1px solid var(--line-soft); background:var(--panel);
-      padding:12px 14px; margin:0 0 8px;
-    }
-    .msg-head{display:flex;align-items:center;gap:12px}
-    .av{width:36px;height:36px;border-radius:50%;background:var(--panel-2);border:1px solid var(--line-soft);object-fit:cover}
-    .av-blank{}
-    .meta{flex:1;min-width:0}
-    .who{color:var(--ink);font-size:13px}
-    .sub{color:var(--ink-mute);font-size:11px;letter-spacing:.04em;margin-top:2px}
-    .jump{font-size:11px;color:var(--ink-mute)}
-    .jump:hover{color:var(--link)}
-
-    .body{
-      margin:8px 0 0;padding:8px 10px;background:var(--bg);
-      border-left:2px solid var(--line);white-space:pre-wrap;word-wrap:break-word;
-      color:var(--ink);font-size:13px;
-    }
-
-    .files{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
-    .thumb img{max-height:180px;max-width:280px;border:1px solid var(--line-soft);border-radius:2px;display:block}
-    .vid{max-width:360px;max-height:240px;border:1px solid var(--line-soft);background:#000}
-    .filechip{
-      display:inline-block;padding:6px 10px;border:1px solid var(--line);
-      background:var(--panel-2);color:var(--ink-soft);font-size:11.5px;
-    }
-    .filechip.ext{border-style:dashed;color:var(--ink-mute)}
-    .filechip:hover{color:var(--ink);border-color:var(--target);text-decoration:none}
-
-    .filters{
-      display:flex;flex-direction:column;gap:8px;
-      border:1px solid var(--line);background:var(--panel);
-      padding:12px 16px;margin-bottom:22px;
-    }
-    .filter-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-    .filter-row .label{font-size:10.5px;color:var(--ink-mute);letter-spacing:.18em;text-transform:uppercase;margin-right:6px;white-space:nowrap}
-    .fbtn{
-      padding:5px 13px;font-size:11.5px;font-family:var(--mono);
-      border:1px solid var(--line);background:var(--panel-2);
-      color:var(--ink-soft);cursor:pointer;letter-spacing:.04em;
-      transition:border-color .15s,color .15s;
-    }
-    .fbtn:hover{border-color:var(--target);color:var(--ink)}
-    .fbtn.active{border-color:var(--target);color:var(--target);background:var(--bg)}
-    .sub-row{display:none;align-items:center;gap:6px;flex-wrap:wrap}
-    .sub-row.visible{display:flex}
-    .hidden{display:none!important}
-
-    .foot{
-      margin-top:40px;padding-top:14px;border-top:1px solid var(--line);
-      color:var(--ink-mute);font-size:11px;letter-spacing:.16em;
-      display:flex;justify-content:space-between;
-    }
-    .foot .nyx{color:var(--target)}
-  `;
-
-  const head = '<!doctype html><html><head><meta charset="utf-8"><title>case file — ' + escapeHtml(data.username || data.userId) + '</title><style>' + css + '</style></head><body>';
+  const head = '<!doctype html><html><head><meta charset="utf-8"><title>case file — ' + escapeHtml(data.username || data.userId) + '</title><link rel="stylesheet" href="/viewer.css"></head><body>';
 
   const stamp = '<div class="stamp">CASE FILE<span class="sep">·</span>' + escapeHtml((data.mode || mode).toUpperCase()) + '<span class="sep">·</span>SCRAPED ' + escapeHtml(new Date().toISOString().slice(0, 19).replace('T', ' ')) + ' UTC</div>';
 
@@ -329,7 +276,12 @@ function buildHTML(data, mode) {
   const statsBlock = '<div class="stats"><div><div class="k">Operation</div><div class="v">' + escapeHtml(data.mode || mode) + '</div></div><div><div class="k">Volume</div><div class="v">' + escapeHtml(totalLine) + '</div></div><div><div class="k">Servers</div><div class="v">' + Object.keys(grouped).length + '</div></div></div>';
 
   const rank   = isMentions ? renderMentioners(data.mentioners, data.userId) : '';
-  const layout = '<div class="layout' + (rank ? ' has-rank' : '') + '"><main id="main-feed">' + sectionParts.join('\n') + '</main>' + rank + '</div>';
+  const layout = '<div class="layout' + (rank ? ' has-rank' : '') + '" id="msg-layout"><main id="main-feed">' + sectionParts.join('\n') + '</main>' + rank + '</div>' +
+    (hasMentionsFeed ? '<div class="layout' + (mentionRankHtml ? ' has-rank' : '') + ' hidden" id="mention-layout"><main id="mention-feed">' + mentionFeedHtml + '</main>' + mentionRankHtml + '</div>' : '');
+
+  const mentionsTabBtn = hasMentionsFeed
+    ? '<button class="fbtn" data-main="mentions">Mentions <span style="opacity:.5;font-size:10px">' + (mentionsData.mentions || []).length + '</span></button>'
+    : '';
 
   const filterBar = `
 <div class="filters">
@@ -338,6 +290,7 @@ function buildHTML(data, mode) {
     <button class="fbtn active" data-main="all">All</button>
     <button class="fbtn" data-main="messages">Messages</button>
     <button class="fbtn" data-main="files">Files</button>
+    ${mentionsTabBtn}
   </div>
   <div class="sub-row" id="sub-row">
     <span class="label">Type</span>
@@ -347,61 +300,212 @@ function buildHTML(data, mode) {
     <button class="fbtn" data-sub="audio">Audio</button>
     <button class="fbtn" data-sub="other">Other</button>
   </div>
+  <div class="intel-row">
+    <span class="label">OSINT Intel</span>
+    <button class="fbtn" data-intel="location">Location<span class="cnt"></span></button>
+    <button class="fbtn" data-intel="economics">Economics<span class="cnt"></span></button>
+    <button class="fbtn" data-intel="identity">Identity<span class="cnt"></span></button>
+    <button class="fbtn" data-intel="social">Social<span class="cnt"></span></button>
+    <button class="fbtn" data-intel="activities">Activities<span class="cnt"></span></button>
+    <button class="fbtn" data-intel="technical">Technical<span class="cnt"></span></button>
+  </div>
 </div>
 <script>
-(function(){
-  var main='all', sub='all';
-  function applyFilter(){
-    var cards=document.querySelectorAll('.msg');
-    cards.forEach(function(c){
-      var has=c.dataset.has?c.dataset.has.split(' '):[];
-      var show=false;
-      if(main==='all'){
-        show=true;
-      } else if(main==='messages'){
-        show=has.indexOf('text')>-1;
-      } else if(main==='files'){
-        var fileTypes=['image','video','audio','other'];
-        var hasFile=has.some(function(t){return fileTypes.indexOf(t)>-1;});
-        if(sub==='all') show=hasFile;
-        else show=has.indexOf(sub)>-1;
-      }
-      c.classList.toggle('hidden',!show);
-    });
-    document.querySelectorAll('.chan').forEach(function(ch){
-      var vis=ch.querySelectorAll('.msg:not(.hidden)').length>0;
-      ch.classList.toggle('hidden',!vis);
-    });
-    document.querySelectorAll('.srv').forEach(function(sv){
-      var vis=sv.querySelectorAll('.chan:not(.hidden)').length>0;
-      sv.classList.toggle('hidden',!vis);
+document.addEventListener('DOMContentLoaded',function(){
+  var INTEL = ${JSON.stringify(INTEL_WORDLISTS)};
+
+  var main = 'all';
+  var sub  = 'all';
+  var intel = null;
+
+  var BADGE_COLORS = {
+    location:'#7dd3fc', economics:'#4ade80', identity:'#f87171',
+    social:'#c084fc', activities:'#fb923c', technical:'#facc15'
+  };
+
+  function addIntelBadges() {
+    document.querySelectorAll('.msg').forEach(function(card) {
+      var old = card.querySelector('.intel-badges');
+      if (old) old.remove();
+      var cats = (card.dataset.intel || '').split(' ').filter(Boolean);
+      if (!cats.length) return;
+      var wrap = document.createElement('div');
+      wrap.className = 'intel-badges';
+      cats.forEach(function(cat) {
+        var b = document.createElement('span');
+        b.className = 'ibadge';
+        b.textContent = cat;
+        b.style.borderColor = BADGE_COLORS[cat] || '#aaa';
+        b.style.color = BADGE_COLORS[cat] || '#aaa';
+        b.title = 'filter by ' + cat;
+        b.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var params = new URLSearchParams(window.location.search);
+          params.get('intel') === cat ? params.delete('intel') : (params.set('intel', cat), params.delete('page'));
+          window.location.search = params.toString();
+        });
+        wrap.appendChild(b);
+      });
+      var head = card.querySelector('.msg-head');
+      if (head) head.appendChild(wrap);
     });
   }
-  document.querySelectorAll('.fbtn[data-main]').forEach(function(btn){
-    btn.addEventListener('click',function(){
-      main=btn.dataset.main;
-      document.querySelectorAll('.fbtn[data-main]').forEach(function(b){b.classList.remove('active');});
+
+  function scanIntel() {
+    document.querySelectorAll('.msg').forEach(function(card) {
+      var body = card.querySelector('.body');
+      var text = body ? body.textContent.toLowerCase() : '';
+      var matched = [];
+      Object.keys(INTEL).forEach(function(cat) {
+        var terms = INTEL[cat];
+        for (var i = 0; i < terms.length; i++) {
+          if (text.indexOf(terms[i].toLowerCase()) > -1) { matched.push(cat); break; }
+        }
+      });
+      card.dataset.intel = matched.join(' ');
+    });
+    Object.keys(INTEL).forEach(function(cat) {
+      var btn = document.querySelector('.fbtn[data-intel="' + cat + '"]');
+      if (!btn) return;
+      var count = document.querySelectorAll('.msg[data-intel~="' + cat + '"]').length;
+      var cnt = btn.querySelector('.cnt');
+      if (cnt) cnt.textContent = count ? ' ' + count : '';
+    });
+    addIntelBadges();
+  }
+
+  function highlightIntel(cat) {
+    document.querySelectorAll('.msg').forEach(function(card) {
+      var body = card.querySelector('.body');
+      if (!body) return;
+      if (body.dataset.orig === undefined) body.dataset.orig = body.textContent;
+      var orig = body.dataset.orig;
+      var cats = cat ? [cat] : (card.dataset.intel || '').split(' ').filter(Boolean);
+      if (!cats.length) { body.textContent = orig; return; }
+      var html = orig.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      var terms = [];
+      cats.forEach(function(c) { terms = terms.concat(INTEL[c] || []); });
+      terms = terms.filter(function(t,i,a){return a.indexOf(t)===i;});
+      terms.sort(function(a,b){return b.length-a.length;});
+      terms.forEach(function(term) {
+        var re = new RegExp('('+term.replace(/[.*+?^\${}()|[\]\\]/g,'\\$&')+')','gi');
+        html = html.replace(re,'<mark class="hl">$1</mark>');
+      });
+      body.innerHTML = html;
+    });
+  }
+
+  function applyFilter() {
+    document.querySelectorAll('.msg').forEach(function(c) {
+      var has       = c.dataset.has   ? c.dataset.has.split(' ')   : [];
+      var intelTags = c.dataset.intel ? c.dataset.intel.split(' ') : [];
+      var typeOk = false;
+      if (main === 'all') {
+        typeOk = true;
+      } else if (main === 'messages') {
+        typeOk = has.indexOf('text') > -1;
+      } else if (main === 'files') {
+        var fileTypes = ['image','video','audio','other'];
+        var hasFile = has.some(function(t) { return fileTypes.indexOf(t) > -1; });
+        typeOk = sub === 'all' ? hasFile : has.indexOf(sub) > -1;
+      }
+      var intelOk = !intel || intelTags.indexOf(intel) > -1;
+      c.classList.toggle('hidden', !(typeOk && intelOk));
+    });
+    document.querySelectorAll('.chan').forEach(function(ch) {
+      var vis = ch.querySelectorAll('.msg:not(.hidden)').length > 0;
+      ch.classList.toggle('hidden', !vis);
+    });
+    document.querySelectorAll('.srv').forEach(function(sv) {
+      var vis = sv.querySelectorAll('.chan:not(.hidden)').length > 0;
+      sv.classList.toggle('hidden', !vis);
+    });
+  }
+
+  document.querySelectorAll('.fbtn[data-main]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      main = btn.dataset.main;
+      document.querySelectorAll('.fbtn[data-main]').forEach(function(b) { b.classList.remove('active'); });
       btn.classList.add('active');
-      var subRow=document.getElementById('sub-row');
-      if(main==='files') subRow.classList.add('visible');
-      else subRow.classList.remove('visible');
+      var subRow      = document.getElementById('sub-row');
+      var msgLayout   = document.getElementById('msg-layout');
+      var mentionLayout = document.getElementById('mention-layout');
+      if (main === 'mentions') {
+        if (msgLayout)    msgLayout.classList.add('hidden');
+        if (mentionLayout) mentionLayout.classList.remove('hidden');
+        if (subRow)       subRow.classList.remove('visible');
+      } else {
+        if (msgLayout)    msgLayout.classList.remove('hidden');
+        if (mentionLayout) mentionLayout.classList.add('hidden');
+        if (main === 'files') subRow.classList.add('visible');
+        else subRow.classList.remove('visible');
+        applyFilter();
+      }
+    });
+  });
+
+  document.querySelectorAll('.fbtn[data-sub]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      sub = btn.dataset.sub;
+      document.querySelectorAll('.fbtn[data-sub]').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
       applyFilter();
     });
   });
-  document.querySelectorAll('.fbtn[data-sub]').forEach(function(btn){
-    btn.addEventListener('click',function(){
-      sub=btn.dataset.sub;
-      document.querySelectorAll('.fbtn[data-sub]').forEach(function(b){b.classList.remove('active');});
-      btn.classList.add('active');
-      applyFilter();
+
+  document.querySelectorAll('.fbtn[data-intel]').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var cat = btn.dataset.intel;
+      var params = new URLSearchParams(window.location.search);
+      if (params.get('intel') === cat) {
+        params.delete('intel');
+      } else {
+        params.set('intel', cat);
+        params.delete('page');
+      }
+      window.location.search = params.toString();
     });
   });
-})();
+
+  scanIntel();
+  var activeIntelParam = new URLSearchParams(window.location.search).get('intel');
+  if (activeIntelParam) {
+    var ab = document.querySelector('.fbtn[data-intel="' + activeIntelParam + '"]');
+    if (ab) ab.classList.add('active');
+    highlightIntel(activeIntelParam);
+  } else {
+    highlightIntel(null);
+  }
+
+  document.querySelectorAll('.rank li[data-id]').forEach(function(li) {
+    li.addEventListener('click', function() {
+      var id = li.dataset.id;
+      var wasSel = li.classList.contains('sel');
+      document.querySelectorAll('.rank li[data-id]').forEach(function(o) { o.classList.remove('sel'); });
+      var filter = wasSel ? null : id;
+      if (!wasSel) li.classList.add('sel');
+      ['#main-feed','#mention-feed'].forEach(function(sel) {
+        var feed = document.querySelector(sel);
+        if (!feed) return;
+        feed.querySelectorAll('.msg').forEach(function(c) {
+          var sender = c.dataset.sender;
+          c.classList.toggle('hidden', filter !== null && sender !== filter);
+        });
+        feed.querySelectorAll('.chan').forEach(function(ch) {
+          ch.classList.toggle('hidden', !ch.querySelectorAll('.msg:not(.hidden)').length);
+        });
+        feed.querySelectorAll('.srv').forEach(function(sv) {
+          sv.classList.toggle('hidden', !sv.querySelectorAll('.chan:not(.hidden)').length);
+        });
+      });
+    });
+  });
+});
 </script>`;
 
   const foot = '<div class="foot"><span>nyx · case archive</span><span class="nyx">(=^ ◕ω◕ ^=)</span></div>';
 
-  return head + '<div class="frame">' + '<div class="top">' + stamp + targetBlock + '</div>' + statsBlock + filterBar + layout + foot + '</div></body></html>';
+  return head + '<div class="frame">' + '<div class="top">' + stamp + targetBlock + '</div>' + statsBlock + pagerBlock + filterBar + layout + (totalPages > 1 ? pagerBlock : '') + foot + '</div></body></html>';
 }
 
 async function launchViewer(outDir, mode) {
@@ -414,20 +518,35 @@ async function launchViewer(outDir, mode) {
   }
 
   const data     = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
-  const html     = buildHTML(data, mode);
   const filesDir = path.resolve(path.join(outDir, 'files'));
 
-  const server = http.createServer((req, res) => {
-    const url = decodeURIComponent((req.url || '/').split('?')[0]);
+  let mentionsData = null;
+  if (mode !== 'mentions') {
+    const mf = path.join(outDir, 'mentions.json');
+    if (fs.existsSync(mf)) mentionsData = JSON.parse(fs.readFileSync(mf, 'utf8'));
+  }
 
-    if (url === '/' || url === '/index.html') {
+  const server = http.createServer((req, res) => {
+    const parsedUrl = new URL((req.url || '/'), 'http://localhost');
+    const pathname  = decodeURIComponent(parsedUrl.pathname);
+
+    if (pathname === '/viewer.css') {
+      res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' });
+      fs.createReadStream(path.join(__dirname, 'viewer.css')).pipe(res);
+      return;
+    }
+
+    if (pathname === '/' || pathname === '/index.html') {
+      const page  = parseInt(parsedUrl.searchParams.get('page') || '0', 10) || 0;
+      const intel = parsedUrl.searchParams.get('intel') || null;
+      const html  = buildHTML(data, mode, page, intel, mentionsData);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);
       return;
     }
 
-    if (url.startsWith('/files/')) {
-      const rel  = url.slice('/files/'.length);
+    if (pathname.startsWith('/files/')) {
+      const rel  = pathname.slice('/files/'.length);
       const full = path.resolve(path.join(filesDir, rel));
       if (!full.startsWith(filesDir)) { res.writeHead(403).end(); return; }
       if (!fs.existsSync(full) || !fs.statSync(full).isFile()) { res.writeHead(404).end(); return; }
@@ -437,7 +556,7 @@ async function launchViewer(outDir, mode) {
       return;
     }
 
-    res.writeHead(404).end();
+    res.writeHead(404).end('not found');
   });
 
   return new Promise((resolve) => {
@@ -448,4 +567,124 @@ async function launchViewer(outDir, mode) {
   });
 }
 
-module.exports = { launchViewer, buildHTML };
+async function launchFileBrowser(dir) {
+  const absDir = path.resolve(dir);
+  const PAGE   = 120;
+
+  function scanFiles(d) {
+    const out = [];
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const full = path.join(d, e.name);
+      if (e.isDirectory()) out.push(...scanFiles(full));
+      else out.push(full);
+    }
+    return out;
+  }
+
+  const allFiles = scanFiles(absDir);
+  const counts   = { images: 0, gifs: 0, videos: 0, audio: 0, other: 0 };
+  for (const f of allFiles) {
+    if (isImage(f) && !f.endsWith('.gif')) counts.images++;
+    else if (f.endsWith('.gif'))           counts.gifs++;
+    else if (isVideo(f))                   counts.videos++;
+    else if (isAudio(f))                   counts.audio++;
+    else                                   counts.other++;
+  }
+
+  function buildBrowserHTML(page, typeFilter) {
+    let items = allFiles;
+    if (typeFilter === 'images')  items = items.filter(f => isImage(f) && !f.endsWith('.gif'));
+    else if (typeFilter === 'gifs')   items = items.filter(f => f.endsWith('.gif'));
+    else if (typeFilter === 'videos') items = items.filter(f => isVideo(f));
+    else if (typeFilter === 'audio')  items = items.filter(f => isAudio(f));
+    else if (typeFilter === 'other')  items = items.filter(f => !isImage(f) && !isVideo(f) && !isAudio(f));
+
+    const total      = items.length;
+    const totalPages = Math.max(1, Math.ceil(total / PAGE));
+    const safePage   = Math.max(0, Math.min(page, totalPages - 1));
+    const slice      = items.slice(safePage * PAGE, (safePage + 1) * PAGE);
+
+    const typeParam  = typeFilter ? '&type=' + typeFilter : '';
+    const prevBtn    = safePage > 0
+      ? '<a class="pbtn" href="/?page=' + (safePage - 1) + typeParam + '">‹ prev</a>'
+      : '<span class="pbtn disabled">‹ prev</span>';
+    const nextBtn    = safePage < totalPages - 1
+      ? '<a class="pbtn" href="/?page=' + (safePage + 1) + typeParam + '">next ›</a>'
+      : '<span class="pbtn disabled">next ›</span>';
+    const pager      = '<div class="pager">' + prevBtn +
+      '<span class="pinfo">' + (safePage + 1) + ' / ' + totalPages + '  ·  ' + total + ' files</span>' +
+      nextBtn + '</div>';
+
+    const filterBtns = ['all','images','gifs','videos','audio','other'].map(t => {
+      const n   = t === 'all' ? allFiles.length : counts[t] || 0;
+      const act = (typeFilter || 'all') === t ? ' active' : '';
+      const h   = t === 'all' ? '/?page=0' : '/?page=0&type=' + t;
+      return '<a class="fbtn' + act + '" href="' + h + '">' + t + ' <span class="cnt">' + n + '</span></a>';
+    }).join('');
+
+    const grid = slice.map(f => {
+      const rel  = f.slice(absDir.length).replace(/\\/g, '/');
+      const href = '/f' + rel.split('/').map(s => encodeURIComponent(s)).join('/');
+      const name = path.basename(f);
+      if (isImage(f)) return '<a class="thumb" href="' + href + '" target="_blank"><img src="' + href + '" loading="lazy" alt=""></a>';
+      if (isVideo(f)) return '<div class="vid-wrap"><video controls preload="metadata" class="vid"><source src="' + href + '"></video><div class="fn">' + escapeHtml(name) + '</div></div>';
+      if (isAudio(f)) return '<div class="aud-wrap"><audio controls preload="none" src="' + href + '"></audio><div class="fn">' + escapeHtml(name) + '</div></div>';
+      return '<a class="filechip" href="' + href + '" target="_blank">' + escapeHtml(name) + '</a>';
+    }).join('');
+
+    return '<!doctype html><html><head><meta charset="utf-8"><title>' + escapeHtml(path.basename(absDir)) + '</title>' +
+      '<link rel="stylesheet" href="/viewer.css">' +
+      '<style>.grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px;align-items:flex-start}' +
+      '.thumb img{max-height:200px;max-width:300px;border:1px solid var(--line);display:block;border-radius:1px}' +
+      '.vid-wrap,.aud-wrap{border:1px solid var(--line);background:var(--panel);padding:8px;max-width:360px}' +
+      '.vid{max-width:100%;max-height:240px;background:#000}' +
+      '.fn{font-size:10.5px;color:var(--ink-mute);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:340px}' +
+      '.fbtn.active{border-color:var(--target);color:var(--target);background:var(--bg)}' +
+      '.cnt{opacity:.55;font-size:10px;margin-left:3px}</style></head>' +
+      '<body><div class="frame">' +
+      '<div class="top"><div class="stamp">' + escapeHtml(path.basename(absDir)) + '</div>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">' + filterBtns + '</div></div>' +
+      pager + '<div class="grid">' + grid + '</div>' + (totalPages > 1 ? pager : '') +
+      '</div></body></html>';
+  }
+
+  const server = http.createServer((req, res) => {
+    const u        = new URL(req.url || '/', 'http://localhost');
+    const pathname = decodeURIComponent(u.pathname);
+
+    if (pathname === '/viewer.css') {
+      res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' });
+      fs.createReadStream(path.join(__dirname, 'viewer.css')).pipe(res);
+      return;
+    }
+
+    if (pathname === '/' || pathname === '/index.html') {
+      const page = parseInt(u.searchParams.get('page') || '0', 10) || 0;
+      const type = u.searchParams.get('type') || '';
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(buildBrowserHTML(page, type));
+      return;
+    }
+
+    if (pathname.startsWith('/f/')) {
+      const rel  = pathname.slice(3);
+      const full = path.resolve(path.join(absDir, rel));
+      if (!full.startsWith(absDir)) { res.writeHead(403).end(); return; }
+      if (!fs.existsSync(full) || !fs.statSync(full).isFile()) { res.writeHead(404).end(); return; }
+      const ext  = path.extname(full).toLowerCase();
+      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+      fs.createReadStream(full).pipe(res);
+      return;
+    }
+
+    res.writeHead(404).end('not found');
+  });
+
+  return new Promise((resolve) => {
+    server.listen(0, '127.0.0.1', () => {
+      resolve({ url: 'http://127.0.0.1:' + server.address().port + '/', server });
+    });
+  });
+}
+
+module.exports = { launchViewer, launchFileBrowser, buildHTML };

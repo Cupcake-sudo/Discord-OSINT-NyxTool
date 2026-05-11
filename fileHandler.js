@@ -66,8 +66,20 @@ function ensureDir(dirPath) {
 
 function moveTmpFiles(tmpDir, filesDir) {
   ensureDir(filesDir);
-  for (const f of fs.readdirSync(tmpDir)) {
-    fs.renameSync(path.join(tmpDir, f), path.join(filesDir, f));
+  for (const entry of fs.readdirSync(tmpDir)) {
+    const src = path.join(tmpDir, entry);
+    const dst = path.join(filesDir, entry);
+    if (fs.statSync(src).isDirectory()) {
+      ensureDir(dst);
+      for (const file of fs.readdirSync(src)) {
+        const fileSrc = path.join(src, file);
+        const fileDst = path.join(dst, file);
+        if (!fs.existsSync(fileDst)) fs.renameSync(fileSrc, fileDst);
+      }
+      fs.rmdirSync(src);
+    } else {
+      if (!fs.existsSync(dst)) fs.renameSync(src, dst);
+    }
   }
   fs.rmdirSync(tmpDir);
 }

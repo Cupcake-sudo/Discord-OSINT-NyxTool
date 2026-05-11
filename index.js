@@ -20,17 +20,39 @@ async function main() {
       const myTag = me.global_name || (me.discriminator && me.discriminator !== '0'
         ? me.username + '#' + me.discriminator
         : me.username);
-      term.statusLog('  ✓  logged in as ' + myTag);
+      term.statusLog('  logged in as        ' + myTag);
+      term.statusLog('  username:           ' + me.username);
+      if (me.id) term.statusLog('  joined discord:     ' + formatSnowflakeDate(me.id));
     } else {
-      term.statusLog('  ✓  token loaded');
+      term.statusLog('  token loaded');
     }
+    term.statusLog('');
   } else {
     token = await term.promptToken();
     term.statusLog('');
   }
 
   const userId = await term.promptUserId();
-  term.statusLog('  ✓  target locked: ' + userId);
+  term.statusLog('  target locked: ' + userId);
+  term.statusLog('');
+
+  term.statusSet('fetching your server list...');
+  const guilds = await discordAPI('/users/@me/guilds');
+
+  if (!Array.isArray(guilds)) {
+    term.stopHeader();
+    console.error('\n  nyx could not fetch servers — that token smells wrong.\n');
+    process.exit(1);
+  }
+
+  const setupLine = term.getOutputLine();
+  term.statusLog('  ' + guilds.length + ' server(s) found');
+
+  const selectedGuilds = await term.promptServerSelect(guilds);
+  if (selectedGuilds.length < guilds.length) {
+    term.statusLog('  ' + selectedGuilds.length + ' server(s) selected');
+    term.statusLog('');
+  }
 
   const op = await term.promptMenu();
 
@@ -38,8 +60,8 @@ async function main() {
   if (op !== 'mentions') {
     heatmap = await term.promptYesNo('  » Heatmap?      [y/n] : ');
   }
-  const wantViewer = await term.promptYesNo('  » Browser view? [y/n] : ');
-  term.statusLog('');
+
+  term.clearLinesFrom(setupLine);
 
   const constants = require('./constants');
   constants.configure({
@@ -65,21 +87,10 @@ async function main() {
   const {
     TARGET_USER_ID, MODE_ALL, MODE_MESSAGES, MODE_FILES, MODE_MENTION,
     MODE_HEATMAP, DOWNLOAD_FILES, SAVE_MESSAGES, FILES_ONLY_MODE,
-    MENTION_ONLY_MODE, SEARCH_DELAY_MS,
+    MENTION_ONLY_MODE, SERVER_DELAY_MIN_MS, SERVER_DELAY_MAX_MS,
   } = constants;
 
   term.setCatMood('hunting');
-
-  term.statusSet('fetching your server list...');
-  const guilds = await discordAPI('/users/@me/guilds');
-
-  if (!Array.isArray(guilds)) {
-    term.stopHeader();
-    console.error('\n  ✗  nyx could not fetch servers — that token smells wrong.\n');
-    process.exit(1);
-  }
-
-  term.statusLog('  ✓  ' + guilds.length + ' server(s) found — ready to pounce');
 
   term.statusSet('picking up the scent...');
   const profile         = await resolveProfile(TARGET_USER_ID);
@@ -87,7 +98,14 @@ async function main() {
   let resolvedAvatar    = profile ? profile.avatar : null;
   await term.delay(1500);
 
-  if (resolvedUsername) term.statusLog('  ✓  target identified:  ' + resolvedUsername);
+  if (resolvedUsername) {
+    term.statusLog('  target identified:  ' + resolvedUsername);
+    if (profile.displayName && profile.displayName !== profile.username) {
+      term.statusLog('  display name:        ' + profile.displayName);
+    }
+    term.statusLog('  username:            ' + profile.username);
+    if (profile.createdAt) term.statusLog('  joined discord:      ' + formatSnowflakeDate(TARGET_USER_ID));
+  }
 
   const tmpDir = '_tmp_' + TARGET_USER_ID;
   if (DOWNLOAD_FILES && !MENTION_ONLY_MODE && !fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir);
@@ -117,7 +135,7 @@ async function main() {
 
   const startTime = Date.now();
 
-  for (const guild of guilds) {
+  for (const guild of selectedGuilds) {
     const name = stripEmoji(guild.name) || guild.id;
     term.serverLogStart(mode, name, unit);
 
@@ -125,9 +143,9 @@ async function main() {
       const mentions = await searchGuildForMentions(guild.id, guild.name, (username) => {
         if (!resolvedUsername) {
           resolvedUsername = username;
-          term.statusLog('  ✓  target identified: ' + resolvedUsername);
+          term.statusLog('  target identified: ' + resolvedUsername);
         }
-      }, (count) => term.serverLogUpdate(count));
+      }, (count, meta) => term.serverLogUpdate(count, meta));
       allMentions.push(...mentions);
       summary.push({ server: name, count: mentions.length, files: [], mentions: mentions.length });
       term.serverLogUpdate(mentions.length);
@@ -137,26 +155,53 @@ async function main() {
         msgs = await searchGuildForFiles(guild.id, guild.name, tmpDir, (username) => {
           if (!resolvedUsername) {
             resolvedUsername = username;
-            term.statusLog('  ✓  target identified: ' + resolvedUsername);
+            term.statusLog('  target identified: ' + resolvedUsername);
           }
-        }, (count) => term.serverLogUpdate(count));
+        }, (count, meta) => term.serverLogUpdate(count, meta));
       } else {
         msgs = await searchGuildForUser(guild.id, guild.name, tmpDir, (username) => {
           if (!resolvedUsername) {
             resolvedUsername = username;
-            term.statusLog('  ✓  target identified: ' + resolvedUsername);
+            term.statusLog('  target identified: ' + resolvedUsername);
           }
-        }, (count) => term.serverLogUpdate(count));
+        }, (count, meta) => term.serverLogUpdate(count, meta));
       }
       const allFiles = msgs.flatMap((m) => m.files || []);
       allMessages.push(...msgs);
-      summary.push({ server: name, count: msgs.length, files: allFiles, mentions: 0 });
-      term.serverLogUpdate(FILES_ONLY_MODE ? allFiles.length : msgs.length);
+
+      let guildMentions = [];
+      if (MODE_ALL) {
+        term.serverLogDone();
+        term.serverLogStart('Mentions', name, 'mentions');
+        guildMentions = await searchGuildForMentions(guild.id, guild.name, (username) => {
+          if (!resolvedUsername) {
+            resolvedUsername = username;
+            term.statusLog('  target identified: ' + resolvedUsername);
+          }
+        }, (count, meta) => term.serverLogUpdate(count, meta));
+        allMentions.push(...guildMentions);
+      } else {
+        term.serverLogUpdate(FILES_ONLY_MODE ? allFiles.length : msgs.length);
+      }
+
+      summary.push({ server: name, count: msgs.length, files: allFiles, mentions: guildMentions.length });
     }
 
     term.serverLogDone();
-    term.statusSet('padding softly to the next server...');
-    await term.delay(SEARCH_DELAY_MS);
+
+    if (guild !== selectedGuilds[selectedGuilds.length - 1]) {
+      const delayMs = Math.floor(Math.random() * (SERVER_DELAY_MAX_MS - SERVER_DELAY_MIN_MS + 1)) + SERVER_DELAY_MIN_MS;
+      term.setCatMood('sleepy');
+      await new Promise((resolve) => {
+        const start = Date.now();
+        const iv = setInterval(() => {
+          const remaining = Math.max(0, (delayMs - (Date.now() - start)) / 1000).toFixed(1);
+          term.statusSet('padding softly to the next server...  ' + remaining + 's');
+          if (Date.now() - start >= delayMs) { clearInterval(iv); resolve(); }
+        }, 100);
+      });
+      term.setCatMood('hunting');
+    }
   }
 
   const elapsed = formatElapsed(Date.now() - startTime);
@@ -199,6 +244,22 @@ async function main() {
     term.stopHeader();
     await term.printResults(rows, './' + outDir + '/');
     viewerMode = 'mentions';
+  } else if (MODE_ALL) {
+    writeMessagesOutput(outDir, filesDir, {
+      finalUsername, targetAvatar: resolvedAvatar, allMessages, serversWithMsgs, totalFiles,
+    });
+    const rows = buildMessageRows(allMessages, serversWithMsgs, totalFiles, elapsed);
+    if (allMentions.length > 0) {
+      const mentioners = writeMentionsOutput(outDir, {
+        finalUsername, targetAvatar: resolvedAvatar, allMentions, serversWithMsgs, totalMentions,
+      });
+      rows.push('');
+      rows.push(...buildMentionRows(mentioners, serversWithMsgs, totalMentions, null));
+    }
+    term.setCatMood('happy');
+    term.stopHeader();
+    await term.printResults(rows, './' + outDir + '/');
+    viewerMode = 'messages';
   } else if (SAVE_MESSAGES) {
     writeMessagesOutput(outDir, filesDir, {
       finalUsername, targetAvatar: resolvedAvatar, allMessages, serversWithMsgs, totalFiles,
@@ -217,14 +278,14 @@ async function main() {
 
   if (MODE_HEATMAP && allMessages.length > 0) {
     await printAndSaveHeatmap(allMessages, outDir, finalUsername);
-    await term.catTypeLine('  ✓  heatmap.txt saved', { charDelay: 14 });
+    await term.catTypeLine('  heatmap.txt saved', { charDelay: 14 });
   }
 
-  if (wantViewer && viewerMode) {
+  if (viewerMode) {
     try {
       const { launchViewer } = require('./viewer');
       const v = await launchViewer(outDir, viewerMode);
-      await term.catTypeLine('  ✓  viewer  →  ' + v.url, { charDelay: 14 });
+      await term.catTypeLine('  viewer  →  ' + v.url, { charDelay: 14 });
       await term.catTypeLine('     ctrl+c to stop', { charDelay: 14 });
       term.finalizeOutput();
       return;
@@ -236,6 +297,18 @@ async function main() {
   term.finalizeOutput();
 }
 
+function formatSnowflakeDate(id) {
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const d      = new Date(Number(BigInt(id) >> 22n) + 1420070400000);
+  const diffMs = Date.now() - d.getTime();
+  const years  = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 365));
+  const months = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 30));
+  const ago    = years >= 1  ? years  + ' year'  + (years  === 1 ? '' : 's') + ' ago'
+               : months >= 1 ? months + ' month' + (months === 1 ? '' : 's') + ' ago'
+               : Math.floor(diffMs / (1000 * 60 * 60 * 24)) + ' days ago';
+  return d.getFullYear() + ' ' + MONTHS[d.getMonth()] + ' ' + d.getDate() + '  (' + ago + ')';
+}
+
 function formatElapsed(ms) {
   const totalSeconds = ms / 1000;
   if (totalSeconds < 60) return totalSeconds.toFixed(1) + 's';
@@ -244,8 +317,74 @@ function formatElapsed(ms) {
   return minutes + 'm ' + seconds + 's';
 }
 
-main().catch((err) => {
-  try { require('./terminal').stopHeader(); } catch {}
-  console.error('\n  ✗  fatal error: ' + err.message);
-  process.exit(1);
-});
+async function viewMode() {
+  const fs       = require('fs');
+  const path     = require('path');
+  const readline = require('readline');
+  const { launchViewer, launchFileBrowser } = require('./viewer');
+
+  let folder = process.argv[3] || null;
+
+  if (!folder) {
+    const dirs = fs.readdirSync('.').filter((f) => {
+      try {
+        return fs.statSync(f).isDirectory() &&
+          (fs.existsSync(path.join(f, 'messages.json')) ||
+           fs.existsSync(path.join(f, 'mentions.json')) ||
+           f.startsWith('_tmp_'));
+      } catch { return false; }
+    });
+
+    if (dirs.length === 0) {
+      console.error('\n  ✗  no output folders found\n');
+      process.exit(1);
+    }
+
+    if (dirs.length === 1) {
+      folder = dirs[0];
+    } else {
+      console.log('\n  available folders:\n');
+      dirs.forEach((d, i) => console.log('  [' + (i + 1) + ']  ' + d));
+      console.log('');
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      folder = await new Promise((resolve) => {
+        rl.question('  » pick a folder: ', (ans) => {
+          rl.close();
+          const idx = parseInt(ans, 10) - 1;
+          resolve(dirs[idx] || dirs[0]);
+        });
+      });
+    }
+  }
+
+  const hasMessages = fs.existsSync(path.join(folder, 'messages.json'));
+  const hasMentions = fs.existsSync(path.join(folder, 'mentions.json'));
+
+  if (!hasMessages && !hasMentions) {
+    console.log('\n  no JSON data — launching file browser for ' + folder + '...\n');
+    const v = await launchFileBrowser(folder);
+    console.log('  viewer  →  ' + v.url);
+    console.log('     ctrl+c to stop\n');
+    return;
+  }
+
+  const mode = hasMentions && !hasMessages ? 'mentions' : 'messages';
+
+  console.log('\n  opening ' + folder + ' (' + mode + ')...\n');
+  const v = await launchViewer(folder, mode);
+  console.log('  viewer  →  ' + v.url);
+  console.log('     ctrl+c to stop\n');
+}
+
+if (process.argv[2] === '--view') {
+  viewMode().catch((err) => {
+    console.error('\n  ✗  ' + err.message + '\n');
+    process.exit(1);
+  });
+} else {
+  main().catch((err) => {
+    try { require('./terminal').stopHeader(); } catch {}
+    console.error('\n  ✗  fatal error: ' + err.message);
+    process.exit(1);
+  });
+}

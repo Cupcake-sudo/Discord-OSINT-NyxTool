@@ -2,9 +2,6 @@ const fs   = require('fs');
 const path = require('path');
 const { SYSTEM_TZ } = require('./constants');
 const { catTypeLine, delay } = require('./terminal');
-const { pad2 } = require('./utils');
-
-let _outputLine_ref = null;
 
 function getLocalHour(isoTimestamp) {
   const date         = new Date(isoTimestamp);
@@ -14,18 +11,23 @@ function getLocalHour(isoTimestamp) {
   return parseInt(localHourStr, 10) % 24;
 }
 
+function formatAMPM(hour) {
+  if (hour === 0)  return '12am';
+  if (hour < 12)  return hour + 'am';
+  if (hour === 12) return '12pm';
+  return (hour - 12) + 'pm';
+}
+
 function buildHeatmap(messages) {
-  const buckets = Array.from({ length: 12 }, (_, i) => ({
-    startHour: i * 2,
-    endHour:   i * 2 + 1,
-    label:     pad2(i * 2) + ':00 – ' + pad2(i * 2 + 1) + ':59',
+  const buckets = Array.from({ length: 24 }, (_, i) => ({
+    startHour: i,
+    label:     formatAMPM(i),
     count:     0,
   }));
   for (const msg of messages) {
     if (!msg.timestamp) continue;
     const hour = getLocalHour(msg.timestamp);
-    const idx  = Math.floor(hour / 2);
-    if (idx >= 0 && idx < 12) buckets[idx].count++;
+    if (hour >= 0 && hour < 24) buckets[hour].count++;
   }
   return buckets.sort((a, b) => b.count - a.count);
 }
@@ -43,12 +45,12 @@ async function printAndSaveHeatmap(messages, outDir, username) {
   const top5     = sorted.slice(0, 5);
   const maxCount = top5[0] ? top5[0].count : 0;
 
-  await catTypeLine('  ━━  HEATMAP  (' + SYSTEM_TZ + ', 2-hour windows)  ━━', { charDelay: 8 });
+  await catTypeLine('  ━━  HEATMAP  (' + SYSTEM_TZ + ', 1-hour windows)  ━━', { charDelay: 8 });
 
   for (let i = 0; i < top5.length; i++) {
     const b   = top5[i];
     const bar = makeBar(b.count, maxCount);
-    const row = '  #' + (i + 1) + '  ' + b.label + '  │' + bar + '│  ' + String(b.count).padStart(4) + ' msg(s)';
+    const row = '  #' + (i + 1) + '  ' + b.label.padEnd(5) + '  │' + bar + '│  ' + String(b.count).padStart(4) + ' msg(s)';
     await catTypeLine(row, { charDelay: 6 });
     await delay(30);
   }
@@ -60,7 +62,7 @@ async function printAndSaveHeatmap(messages, outDir, username) {
   let txt = 'DISCORD OSINT — ACTIVITY HEATMAP\n' + '═'.repeat(64) + '\n\n';
   txt += '  User      : ' + username + '\n';
   txt += '  Timezone  : ' + SYSTEM_TZ + '\n';
-  txt += '  Window    : 2-hour buckets\n';
+  txt += '  Window    : 1-hour buckets\n';
   txt += '  Total msgs: ' + messages.length + '\n\n';
   txt += '═'.repeat(64) + '\n\n';
   txt += '  TOP 5 PEAK WINDOWS\n  ' + '─'.repeat(60) + '\n\n';
@@ -79,7 +81,7 @@ async function printAndSaveHeatmap(messages, outDir, username) {
   const allMax = byHour.reduce((m, b) => Math.max(m, b.count), 0);
   for (const b of byHour) {
     const bar = makeBar(b.count, allMax);
-    txt += '  ' + b.label + '  │' + bar + '│  ' + String(b.count).padStart(4) + ' msg(s)\n';
+    txt += '  ' + b.label.padEnd(5) + '  │' + bar + '│  ' + String(b.count).padStart(4) + ' msg(s)\n';
   }
   txt += '\n' + '═'.repeat(64) + '\n';
 

@@ -1,6 +1,6 @@
 const fetch = require('node-fetch');
 const { RATE_LIMIT_WAIT_MS } = require('./constants');
-const { statusSet, statusLog, delay } = require('./terminal');
+const { statusLog, serverSubSet, serverSubClear, delay } = require('./terminal');
 
 let DISCORD_TOKEN = '';
 
@@ -21,40 +21,22 @@ async function discordAPI(apiPath) {
   if (res.status === 429) {
     const { setCatMood } = require('./terminal');
 
-    const rateLimitMessages = [
-      'got caught... sitting very still...',
-      'pretending to be a normal cat...',
-      'staring at the wall and thinking about choices...',
-      'waiting patiently (not really)...',
-      'tail tucked. dignity: minimal...',
-      'contemplating every decision that led here...',
-    ];
-
     const waitMs = RATE_LIMIT_WAIT_MS;
-
-    let rlMsgIdx  = 0;
-    let rlMsgTick = 0;
-    const RL_MSG_HOLD = 6;
-    const total = waitMs / 1000;
-    const start = Date.now();
+    const total  = waitMs / 1000;
+    const start  = Date.now();
 
     setCatMood('sad');
 
     const rlIv = setInterval(() => {
       const elapsed   = Math.floor((Date.now() - start) / 1000);
       const remaining = Math.max(0, total - elapsed);
-      statusSet(rateLimitMessages[rlMsgIdx] + '  back in ' + remaining + 's');
-      rlMsgTick++;
-      if (rlMsgTick >= RL_MSG_HOLD) {
-        rlMsgTick = 0;
-        rlMsgIdx  = (rlMsgIdx + 1) % rateLimitMessages.length;
-      }
+      serverSubSet('⟳  rate limited — resuming in ' + remaining + 's');
     }, 500);
 
     await delay(waitMs);
     clearInterval(rlIv);
     setCatMood('hunting');
-    statusLog('  ✓  timeout lifted — back on the trail...');
+    serverSubClear();
     return discordAPI(apiPath);
   }
 
@@ -96,11 +78,14 @@ async function resolveProfile(userId) {
       const tag = user.discriminator && user.discriminator !== '0'
         ? user.username + '#' + user.discriminator
         : user.username;
+      const createdMs = Number(BigInt(userId) >> 22n) + 1420070400000;
       return {
-        id:            user.id,
+        id:          user.id,
         tag,
-        avatar:        user.avatar || null,
-        discriminator: user.discriminator || null,
+        displayName: user.global_name || null,
+        username:    user.username,
+        avatar:      user.avatar || null,
+        createdAt:   new Date(createdMs),
       };
     }
   } catch {}

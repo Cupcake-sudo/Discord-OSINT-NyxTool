@@ -15,12 +15,26 @@ let _statusMsg  = 'warming up...';
 let _headerIv   = null;
 let _outputLine = 1;
 let _catLine    = null;
+let _flatOutput = false;
 
-let _serverLine  = null;
-let _serverName  = '';
-let _serverMode  = '';
-let _serverCount = 0;
-let _serverUnit  = '';
+const LOGO_COLOURS = [
+  '\x1b[38;5;240m',
+  '\x1b[38;5;244m',
+  '\x1b[38;5;248m',
+  '\x1b[38;5;252m',
+  '\x1b[38;5;255m',
+  '\x1b[38;5;252m',
+  '\x1b[38;5;248m',
+  '\x1b[38;5;244m',
+];
+
+let _serverLine    = null;
+let _serverSubLine = null;
+let _serverName    = '';
+let _serverMode    = '';
+let _serverCount   = 0;
+let _serverUnit    = '';
+let _serverMeta    = '';
 
 function moveCursor(row, col) {
   return '\x1b[' + row + ';' + col + 'H';
@@ -36,12 +50,18 @@ function clearScreen() {
   process.stdout.write(moveCursor(1, 1));
 }
 
+let _catSepAbove = null;
+let _catSepBelow = null;
+
 function lockCatBelowBanner() {
-  _catLine     = _outputLine;
+  _catSepAbove = _outputLine;
+  _catLine     = _outputLine + 1;
+  _catSepBelow = _outputLine + 2;
   _outputLine += 3;
   if (!_headerIv) {
-    _headerIv = setInterval(() => updateHeader(), 300);
+    _headerIv = setInterval(() => updateHeader(), 150);
   }
+  updateHeader();
 }
 
 function setCatMood(mood) {
@@ -53,19 +73,19 @@ function setCatMood(mood) {
 
 function updateHeader() {
   if (_catLine === null) return;
-  const faces     = CAT_FACES[_catMood] || CAT_FACES.idle;
-  const c         = faces[_catFrame % faces.length];
-  const col       = BANNER_COLOURS[_catFrame % BANNER_COLOURS.length];
-  const maxMsgLen = Math.max(10, (process.stdout.columns || 80) - 20);
+  const faces  = CAT_FACES[_catMood] || CAT_FACES.idle;
+  const c      = faces[_catFrame % faces.length];
+  const col    = BANNER_COLOURS[_catFrame % BANNER_COLOURS.length];
+  const catW   = stripAnsi(c).length;
+  const bar    = '─'.repeat(catW);
+  const maxMsgLen = Math.max(10, (process.stdout.columns || 80) - catW - 10);
   const safeMsg   = String(_statusMsg).replace(/[\r\n]/g, ' ').slice(0, maxMsgLen);
-  const innerLen  = stripAnsi(c).length + safeMsg.length + 7;
-  const boxWidth  = Math.min(innerLen + 2, (process.stdout.columns || 80) - 4);
 
   process.stdout.write(
     SAVE_CURSOR +
-    moveCursor(_catLine, 1)     + CLEAR_LINE + col + '  ╭' + '─'.repeat(boxWidth) + '╮' + RESET +
-    moveCursor(_catLine + 1, 1) + CLEAR_LINE + '   ' + col + c + '  │  ' + safeMsg + RESET + ' ' +
-    moveCursor(_catLine + 2, 1) + CLEAR_LINE + col + '  ╰' + '─'.repeat(boxWidth) + '╯' + RESET +
+    moveCursor(_catSepAbove, 1) + CLEAR_LINE + '  ' + col + '╭' + bar + '╮' + RESET +
+    moveCursor(_catLine,     1) + CLEAR_LINE + '  ' + col + '│' + c + '│' + RESET + '  ' + DIM + safeMsg + RESET +
+    moveCursor(_catSepBelow, 1) + CLEAR_LINE + '  ' + col + '╰' + bar + '╯' + RESET +
     RESTORE_CURSOR
   );
   _catFrame++;
@@ -89,15 +109,37 @@ function serverLogStart(mode, name, unit) {
   _serverName  = name;
   _serverUnit  = unit;
   _serverCount = 0;
+  _serverMeta = '';
   if (_serverLine === null) {
-    _serverLine  = _outputLine;
-    _outputLine++;
+    _serverLine    = _outputLine;
+    _serverSubLine = _outputLine + 1;
+    _outputLine   += 2;
+  } else {
+    serverSubClear();
   }
   _redrawServerLine(false);
 }
 
-function serverLogUpdate(count) {
+function serverSubSet(msg) {
+  if (_serverSubLine === null) return;
+  process.stdout.write(SAVE_CURSOR + moveCursor(_serverSubLine, 1) + CLEAR_LINE + '  ' + DIM + msg + RESET + RESTORE_CURSOR);
+}
+
+function serverSubClear() {
+  if (_serverSubLine === null) return;
+  process.stdout.write(SAVE_CURSOR + moveCursor(_serverSubLine, 1) + CLEAR_LINE + RESTORE_CURSOR);
+}
+
+function clearLinesFrom(fromLine) {
+  for (let row = fromLine; row < _outputLine; row++) {
+    process.stdout.write(SAVE_CURSOR + moveCursor(row, 1) + CLEAR_LINE + RESTORE_CURSOR);
+  }
+  _outputLine = fromLine;
+}
+
+function serverLogUpdate(count, meta) {
   _serverCount = count;
+  if (meta !== undefined) _serverMeta = meta;
   _redrawServerLine(false);
 }
 
@@ -108,8 +150,9 @@ function serverLogDone() {
 function _redrawServerLine(done) {
   if (_serverLine === null) return;
   const tick  = done ? '✓' : '▸';
-  const count = _serverCount > 0 ? ' (' + _serverCount + ' ' + _serverUnit + ')' : '';
-  const line  = '  ' + tick + '  ' + BOLD + _serverMode + RESET + DIM + ' > ' + RESET + _serverName + DIM + count + RESET;
+  const meta  = _serverMeta ? '  ' + _serverMeta : '';
+  const count = _serverCount > 0 ? ' (' + _serverCount + ' ' + _serverUnit + meta + ')' : '';
+  const line  = '  ' + tick + '  ' + BOLD + _serverMode + RESET + DIM + ' │ ' + RESET + _serverName + DIM + count + RESET;
   process.stdout.write(
     SAVE_CURSOR +
     moveCursor(_serverLine, 1) +
@@ -124,6 +167,15 @@ function stopHeader() {
     clearInterval(_headerIv);
     _headerIv = null;
   }
+  if (_catLine !== null) {
+    process.stdout.write(
+      moveCursor(_catSepAbove, 1) + CLEAR_LINE +
+      moveCursor(_catLine,     1) + CLEAR_LINE +
+      moveCursor(_catSepBelow, 1) + CLEAR_LINE
+    );
+  }
+  _flatOutput = true;
+  process.stdout.write(moveCursor(_outputLine, 1));
   process.stdout.write(SHOW_CURSOR);
 }
 
@@ -164,6 +216,17 @@ async function typeLine(text, { charDelay = 18, newline = true } = {}) {
 }
 
 async function catTypeLine(text, { charDelay = 13 } = {}) {
+  if (_flatOutput) {
+    let out = '';
+    for (const ch of text) {
+      out += ch;
+      process.stdout.write('\r' + out);
+      await delay(charDelay);
+    }
+    process.stdout.write('\n');
+    _outputLine++;
+    return;
+  }
   let out = '';
   for (const ch of text) {
     out += ch;
@@ -177,54 +240,62 @@ async function catTypeLine(text, { charDelay = 13 } = {}) {
 }
 
 async function printResults(rows, folderPath) {
+  process.stdout.write('\n');
   _outputLine++;
   for (const row of rows) {
     await catTypeLine(row, { charDelay: 11 });
     await delay(35);
   }
+  process.stdout.write('\n');
   _outputLine++;
-  await catTypeLine('  ✓  Folder  →  ' + folderPath, { charDelay: 18 });
+  await catTypeLine('  Folder  →  ' + folderPath, { charDelay: 18 });
+  process.stdout.write('\n');
   _outputLine++;
 }
 
 async function printBanner() {
   const bannerLines = [
-'▐ ▄  ▄· ▄▌▐▄• ▄                                             ',
-'•█▌▐█▐█▪██▌ █▌█▌▪                                            ',
-'▐█▐▐▌▐█▌▐█▪ ·██·                                             ',
-'██▐█▌ ▐█▀·.▪▐█·█▌                                            ',
-'▀▀ █▪  ▀ • •▀▀ ▀▀                                            ',
-'·▄▄▄▄  ▪  .▄▄ ·  ▄▄·       ▄▄▄  ·▄▄▄▄  ▄▄▄▄▄            ▄▄▌  ',
-'██▪ ██ ██ ▐█ ▀. ▐█ ▌▪▪     ▀▄ █·██▪ ██ •██  ▪     ▪     ██•  ',
-'▐█· ▐█▌▐█·▄▀▀▀█▄██ ▄▄ ▄█▀▄ ▐▀▀▄ ▐█· ▐█▌ ▐█.▪ ▄█▀▄  ▄█▀▄ ██▪  ',
-'██. ██ ▐█▌▐█▄▪▐█▐███▌▐█▌.▐▌▐█•█▌██. ██  ▐█▌·▐█▌.▐▌▐█▌.▐▌▐█▌▐▌',
-'▀▀▀▀▀• ▀▀▀ ▀▀▀▀ ·▀▀▀  ▀█▄▀▪.▀  ▀▀▀▀▀▀•  ▀▀▀  ▀█▄▀▪ ▀█▄▀▪.▀▀▀  ',
-'',
+    '▐ ▄  ▄· ▄▌▐▄• ▄',
+    '•█▌▐█▐█▪██▌ █▌█▌▪',
+    '▐█▐▐▌▐█▌▐█▪ ·██·',
+    '██▐█▌ ▐█▀·.▪▐█·█▌',
+    '▀▀ █▪  ▀ • •▀▀ ▀▀',
+    '',
+    '·▄▄▄▄  ▪  .▄▄ ·  ▄▄·       ▄▄▄  ·▄▄▄▄  ▄▄▄▄▄            ▄▄▌',
+    '██▪ ██ ██ ▐█ ▀. ▐█ ▌▪▪     ▀▄ █·██▪ ██ •██  ▪     ▪     ██•',
+    '▐█· ▐█▌▐█·▄▀▀▀█▄██ ▄▄ ▄█▀▄ ▐▀▀▄ ▐█· ▐█▌ ▐█.▪ ▄█▀▄  ▄█▀▄ ██▪',
+    '██. ██ ▐█▌▐█▄▪▐█▐███▌▐█▌.▐▌▐█•█▌██. ██  ▐█▌·▐█▌.▐▌▐█▌.▐▌▐█▌▐▌',
+    '▀▀▀▀▀• ▀▀▀ ▀▀▀▀ ·▀▀▀  ▀█▄▀▪.▀  ▀▀▀▀▀▀•  ▀▀▀  ▀█▄▀▪ ▀█▄▀▪.▀▀▀',
   ];
 
-  const cols     = process.stdout.columns || 120;
-  const maxLen   = bannerLines.reduce((m, l) => Math.max(m, l.trimEnd().length), 0);
-  const boxWidth = Math.min(maxLen + 4, cols - 4);
-
-  await typeLine('  ╭' + '─'.repeat(boxWidth) + '╮', { charDelay: 1 });
+  _bannerStartLine  = _outputLine;
+  let colorIdx = 0;
 
   for (const line of bannerLines) {
     if (line === '') {
-      await typeLine('  │' + ' '.repeat(boxWidth) + '│', { charDelay: 0 });
-    } else {
-      const trimmed    = line.trimEnd();
-      const innerWidth = boxWidth - 2;
-      const totalPad   = Math.max(0, innerWidth - trimmed.length);
-      const leftPad    = Math.floor(totalPad / 2);
-      const rightPad   = totalPad - leftPad;
-      const padded     = ' '.repeat(leftPad) + trimmed + ' '.repeat(rightPad);
-      await typeLine('  │ ' + padded + ' │', { charDelay: 3 });
+      _outputLine++;
+      await delay(40);
+      continue;
     }
+
+    let built = '  ';
+    process.stdout.write(SAVE_CURSOR + moveCursor(_outputLine, 1) + CLEAR_LINE + RESTORE_CURSOR);
+
+    for (const ch of line) {
+      const col = LOGO_COLOURS[colorIdx % LOGO_COLOURS.length];
+      colorIdx++;
+      built += col + ch + RESET;
+      process.stdout.write(SAVE_CURSOR + moveCursor(_outputLine, 1) + CLEAR_LINE + built + RESTORE_CURSOR);
+      await delay(2);
+    }
+    _outputLine++;
+    await delay(18);
   }
 
-  await typeLine('  ╰' + '─'.repeat(boxWidth) + '╯', { charDelay: 2 });
   _outputLine++;
-  await glitchType('~ sniffing discord ~', { charDelay: 4, glitches: 4 });
+  await glitchType('~ harvest  ·  analyze  ·  profile ~', { charDelay: 5, glitches: 4 });
+  process.stdout.write(SAVE_CURSOR + moveCursor(_outputLine, 1) + CLEAR_LINE + DIM + '─'.repeat(36) + RESET + RESTORE_CURSOR);
+  _outputLine++;
   lockCatBelowBanner();
 }
 
@@ -293,6 +364,54 @@ async function promptUserId() {
   }
 }
 
+async function promptServerSelect(guilds) {
+  setCatMood('idle');
+  statusSet('pick your servers...');
+
+  const listStart = _outputLine;
+  statusLog('');
+
+  const ROWS     = 5;
+  const padNum   = String(guilds.length).length;
+  const maxName  = Math.min(30, Math.max(...guilds.map(g => (g.name || g.id).length)));
+  const colWidth = 3 + padNum + 2 + 2 + maxName; // "   [N]  name"
+  const termW    = process.stdout.columns || 120;
+  const maxCols  = Math.max(1, Math.floor(termW / colWidth));
+  const numRows  = Math.min(ROWS, guilds.length);
+  const numCols  = Math.min(Math.ceil(guilds.length / numRows), maxCols);
+
+  for (let row = 0; row < numRows; row++) {
+    let line = '';
+    for (let col = 0; col < numCols; col++) {
+      const idx = col * numRows + row;
+      if (idx >= guilds.length) break;
+      const name  = (guilds[idx].name || guilds[idx].id).slice(0, maxName);
+      const label = '[' + String(idx + 1).padStart(padNum) + ']';
+      line += ('   ' + label + '  ' + name).padEnd(colWidth + 2);
+    }
+    statusLog(line.trimEnd());
+  }
+  statusLog('');
+
+  const ans = await _question('  » Servers [1,2,3 or enter for all] : ');
+
+  for (let row = listStart; row <= _outputLine; row++) {
+    process.stdout.write(SAVE_CURSOR + moveCursor(row, 1) + CLEAR_LINE + RESTORE_CURSOR);
+  }
+  _outputLine = listStart;
+
+  if (!ans.trim()) return guilds;
+
+  const selected = ans.split(',')
+    .map((s) => {
+      const idx = parseInt(s.trim(), 10) - 1;
+      return (idx >= 0 && idx < guilds.length) ? guilds[idx] : null;
+    })
+    .filter(Boolean);
+
+  return selected.length > 0 ? selected : guilds;
+}
+
 async function promptMenu() {
   setCatMood('idle');
   statusSet('select an operation...');
@@ -301,6 +420,7 @@ async function promptMenu() {
   statusLog('   [1]  Messages');
   statusLog('   [2]  Files');
   statusLog('   [3]  Mentions');
+  statusLog('');
   statusLog('   [4]  All');
   statusLog('');
 
@@ -342,7 +462,6 @@ function getOutputLine() { return _outputLine; }
 function setOutputLine(n) { _outputLine = n; }
 
 function finalizeOutput() {
-  process.stdout.write(moveCursor(_outputLine + 1, 1));
   process.stdout.write('\n');
 }
 
@@ -359,6 +478,7 @@ module.exports = {
   printBanner,
   promptToken,
   promptUserId,
+  promptServerSelect,
   promptMenu,
   promptYesNo,
   printResults,
@@ -371,5 +491,8 @@ module.exports = {
   serverLogStart,
   serverLogUpdate,
   serverLogDone,
+  serverSubSet,
+  serverSubClear,
+  clearLinesFrom,
   delay,
 };
