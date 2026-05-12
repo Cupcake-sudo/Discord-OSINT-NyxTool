@@ -1,3 +1,4 @@
+
 const fetch = require('node-fetch');
 const { RATE_LIMIT_WAIT_MS } = require('./constants');
 const { statusLog, serverSubSet, serverSubClear, delay } = require('./terminal');
@@ -20,23 +21,18 @@ async function discordAPI(apiPath) {
 
   if (res.status === 429) {
     const { setCatMood } = require('./terminal');
-    const CLOCK = ['◴', '◷', '◶', '◵'];
 
     const waitMs = RATE_LIMIT_WAIT_MS;
     const total  = waitMs / 1000;
     const start  = Date.now();
-    let   frame  = 0;
 
     setCatMood('sad');
 
     const rlIv = setInterval(() => {
-      const remaining = Math.max(0, total - Math.floor((Date.now() - start) / 1000));
-      const mins      = Math.floor(remaining / 60);
-      const secs      = remaining % 60;
-      const timeStr   = mins > 0 ? mins + ':' + String(secs).padStart(2, '0') : secs + 's';
-      serverSubSet(CLOCK[frame % CLOCK.length] + '  ' + timeStr);
-      frame++;
-    }, 250);
+      const elapsed   = Math.floor((Date.now() - start) / 1000);
+      const remaining = Math.max(0, total - elapsed);
+      serverSubSet('⟳  rate limited — resuming in ' + remaining + 's');
+    }, 500);
 
     await delay(waitMs);
     clearInterval(rlIv);
@@ -47,6 +43,9 @@ async function discordAPI(apiPath) {
 
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
+    const body = await res.text();
+    statusLog('  ✗  unexpected response (HTTP ' + res.status + ') — skipping this request');
+    statusLog('     hint: ' + body.slice(0, 120).replace(/[\r\n]+/g, ' ').trim() + '...');
     return { code: res.status, message: 'non-JSON response (HTTP ' + res.status + ')' };
   }
 
@@ -81,35 +80,13 @@ async function resolveProfile(userId) {
         ? user.username + '#' + user.discriminator
         : user.username;
       const createdMs = Number(BigInt(userId) >> 22n) + 1420070400000;
-
-      let mutualGuilds        = [];
-      let mutualFriendsCount  = null;
-      let bio                 = null;
-      try {
-        const profRes = await fetch(
-          'https://discord.com/api/v9/users/' + userId + '/profile?with_mutual_guilds=true&with_mutual_friends_count=true',
-          { headers: { Authorization: DISCORD_TOKEN.replace(/^"|"$/g, '') } }
-        );
-        if (profRes.ok) {
-          const prof = await profRes.json();
-          if (prof && !prof.code) {
-            mutualGuilds       = prof.mutual_guilds       || [];
-            mutualFriendsCount = prof.mutual_friends_count ?? null;
-            bio                = prof.user_profile?.bio   || null;
-          }
-        }
-      } catch {}
-
       return {
-        id:                 user.id,
+        id:          user.id,
         tag,
-        displayName:        user.global_name || null,
-        username:           user.username,
-        avatar:             user.avatar      || null,
-        createdAt:          new Date(createdMs),
-        mutualGuilds,
-        mutualFriendsCount,
-        bio,
+        displayName: user.global_name || null,
+        username:    user.username,
+        avatar:      user.avatar || null,
+        createdAt:   new Date(createdMs),
       };
     }
   } catch {}
