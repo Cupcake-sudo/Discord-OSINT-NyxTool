@@ -9,26 +9,58 @@ async function main() {
   await term.printBanner();
 
   const env = loadEnv();
-  let token;
+  let token = null;
   if (env.Token && env.Token.length) {
     token = env.Token.trim();
     setToken(token);
-    
     term.statusSet('checking token...');
     const me = await discordAPI('/users/@me');
     if (me && me.username && !me.code) {
       const myTag = me.global_name || (me.discriminator && me.discriminator !== '0'
-        ? me.username + '#' + me.discriminator
-        : me.username);
+        ? me.username + '#' + me.discriminator : me.username);
       term.statusLog('  logged in as        ' + myTag);
-      term.statusLog('  username:           ' + me.username);
-      if (me.id) term.statusLog('  joined discord:     ' + formatSnowflakeDate(me.id));
     } else {
       term.statusLog('  token loaded');
     }
-    term.statusLog('');
-  } else {
+  }
+
+  const fs_   = require('fs');
+  const path_ = require('path');
+  const scanDirs = fs_.readdirSync('.').filter(f => {
+    try {
+      return fs_.statSync(f).isDirectory() &&
+        (fs_.existsSync(path_.join(f, 'messages.json')) ||
+         fs_.existsSync(path_.join(f, 'mentions.json')));
+    } catch { return false; }
+  });
+
+  const action = await term.promptStartMenu(scanDirs.length > 0);
+
+  if (action === 'view') {
+    const { launchViewer } = require('./viewer');
+    const folder = scanDirs.length === 1 ? scanDirs[0] : await term.promptFolderSelect(scanDirs);
+    const hasMessages = fs_.existsSync(path_.join(folder, 'messages.json'));
+    const hasMentions = fs_.existsSync(path_.join(folder, 'mentions.json'));
+    const mode = hasMentions && !hasMessages ? 'mentions' : 'messages';
+    term.stopHeader();
+    const v = await launchViewer(folder, mode);
+    await term.catTypeLine('  viewer  →  ' + v.url, { charDelay: 14 });
+    await term.catTypeLine('     ctrl+c to stop', { charDelay: 14 });
+    term.finalizeOutput();
+    return;
+  }
+
+  // action === 'scan'
+  if (!token) {
     token = await term.promptToken();
+    setToken(token);
+    term.statusSet('checking token...');
+    const me = await discordAPI('/users/@me');
+    if (me && me.username && !me.code) {
+      const myTag = me.global_name || (me.discriminator && me.discriminator !== '0'
+        ? me.username + '#' + me.discriminator : me.username);
+      term.statusLog('  logged in as        ' + myTag);
+    }
     term.statusLog('');
   }
 
@@ -48,11 +80,7 @@ async function main() {
   const setupLine = term.getOutputLine();
   term.statusLog('  ' + guilds.length + ' server(s) found');
 
-  const selectedGuilds = await term.promptServerSelect(guilds);
-  if (selectedGuilds.length < guilds.length) {
-    term.statusLog('  ' + selectedGuilds.length + ' server(s) selected');
-    term.statusLog('');
-  }
+  const selectedGuilds = guilds;
 
   const op = await term.promptMenu();
 
@@ -94,17 +122,27 @@ async function main() {
 
   let profileShown = false;
 
-  async function showTargetProfile(usernameOverride) {
+  async function showTargetProfile(usernameOverride, authorObj) {
     if (profileShown) return;
     const prof = await resolveProfile(TARGET_USER_ID);
-    const tag  = prof ? prof.tag : (usernameOverride || null);
+
+    const tag = prof ? prof.tag
+      : (authorObj && authorObj.username) ? (authorObj.discriminator && authorObj.discriminator !== '0' ? authorObj.username + '#' + authorObj.discriminator : authorObj.username)
+      : (usernameOverride || null);
     if (!tag) return;
+
+    const displayName = prof ? prof.displayName : (authorObj ? (authorObj.global_name || null) : null);
+    const username    = prof ? prof.username    : (authorObj ? authorObj.username : tag);
+    const avatar      = prof ? prof.avatar      : (authorObj ? authorObj.avatar   : null);
+
+    if (avatar && !resolvedAvatar) resolvedAvatar = avatar;
     profileShown = true;
+
     term.statusLog('  target identified:  ' + tag);
-    if (prof && prof.displayName && prof.displayName !== prof.username) {
-      term.statusLog('  display name:        ' + prof.displayName);
+    if (displayName && displayName !== username) {
+      term.statusLog('  display name:        ' + displayName);
     }
-    if (prof) term.statusLog('  username:            ' + prof.username);
+    term.statusLog('  username:            ' + username);
     term.statusLog('  joined discord:      ' + formatSnowflakeDate(TARGET_USER_ID));
     if (prof && prof.bio) term.statusLog('  bio:                 ' + prof.bio.replace(/\n/g, ' ').slice(0, 80));
     if (prof && prof.mutualFriendsCount !== null) term.statusLog('  mutual friends:      ' + prof.mutualFriendsCount);
@@ -153,10 +191,10 @@ async function main() {
     term.serverLogStart(mode, name, unit);
 
     if (MENTION_ONLY_MODE) {
-      const mentions = await searchGuildForMentions(guild.id, guild.name, async (username) => {
+      const mentions = await searchGuildForMentions(guild.id, guild.name, async (username, authorObj) => {
         if (!resolvedUsername) {
           resolvedUsername = username;
-          await showTargetProfile(username);
+          await showTargetProfile(username, authorObj);
         }
       }, (count, meta) => term.serverLogUpdate(count, meta));
       allMentions.push(...mentions);
@@ -165,17 +203,17 @@ async function main() {
     } else {
       let msgs;
       if (FILES_ONLY_MODE) {
-        msgs = await searchGuildForFiles(guild.id, guild.name, tmpDir, async (username) => {
+        msgs = await searchGuildForFiles(guild.id, guild.name, tmpDir, async (username, authorObj) => {
           if (!resolvedUsername) {
             resolvedUsername = username;
-            await showTargetProfile(username);
+            await showTargetProfile(username, authorObj);
           }
         }, (count, meta) => term.serverLogUpdate(count, meta));
       } else {
-        msgs = await searchGuildForUser(guild.id, guild.name, tmpDir, async (username) => {
+        msgs = await searchGuildForUser(guild.id, guild.name, tmpDir, async (username, authorObj) => {
           if (!resolvedUsername) {
             resolvedUsername = username;
-            await showTargetProfile(username);
+            await showTargetProfile(username, authorObj);
           }
         }, (count, meta) => term.serverLogUpdate(count, meta));
       }
@@ -186,10 +224,10 @@ async function main() {
       if (MODE_ALL) {
         term.serverLogDone();
         term.serverLogStart('Mentions', name, 'mentions');
-        guildMentions = await searchGuildForMentions(guild.id, guild.name, async (username) => {
+        guildMentions = await searchGuildForMentions(guild.id, guild.name, async (username, authorObj) => {
           if (!resolvedUsername) {
             resolvedUsername = username;
-            await showTargetProfile(username);
+            await showTargetProfile(username, authorObj);
           }
         }, (count, meta) => term.serverLogUpdate(count, meta));
         allMentions.push(...guildMentions);

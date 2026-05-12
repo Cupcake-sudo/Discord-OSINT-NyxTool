@@ -279,7 +279,7 @@ async function printResults(rows, folderPath) {
 }
 
 async function printBanner() {
-  _bannerStartLine  = _outputLine;
+  _bannerStartLine = _outputLine;
   let colorIdx = 0;
 
   for (const line of _BANNER_LINES) {
@@ -431,6 +431,62 @@ async function promptMenu() {
   }
 }
 
+async function promptStartMenu(hasPreviousScans) {
+  setCatMood('idle');
+  statusSet('what would you like to do?');
+
+  const startLine = _outputLine;
+  statusLog('');
+  statusLog('   [1]  New Scan');
+  if (hasPreviousScans) {
+    statusLog('   [2]  Open Viewer');
+  } else {
+    statusLog(DIM + '   [2]  Open Viewer  (no scans found)' + RESET);
+  }
+  statusLog('');
+
+  const map = hasPreviousScans
+    ? { '1': 'scan', '2': 'view' }
+    : { '1': 'scan' };
+
+  while (true) {
+    const ans = await _question('  » Select           : ');
+    if (map[ans]) {
+      for (let row = startLine; row <= _outputLine; row++) {
+        process.stdout.write(SAVE_CURSOR + moveCursor(row, 1) + CLEAR_LINE + RESTORE_CURSOR);
+      }
+      _outputLine = startLine;
+      return map[ans];
+    }
+  }
+}
+
+async function promptFolderSelect(folders) {
+  setCatMood('idle');
+  statusSet('pick a folder...');
+
+  const startLine = _outputLine;
+  statusLog('');
+  for (let i = 0; i < folders.length; i++) {
+    statusLog('   [' + (i + 1) + ']  ' + folders[i]);
+  }
+  statusLog('');
+
+  let result;
+  while (true) {
+    const ans = await _question('  » Folder           : ');
+    const idx = parseInt(ans, 10) - 1;
+    if (idx >= 0 && idx < folders.length) { result = folders[idx]; break; }
+    if (ans === '' && folders.length > 0) { result = folders[0]; break; }
+  }
+
+  for (let row = startLine; row <= _outputLine; row++) {
+    process.stdout.write(SAVE_CURSOR + moveCursor(row, 1) + CLEAR_LINE + RESTORE_CURSOR);
+  }
+  _outputLine = startLine;
+  return result;
+}
+
 async function promptYesNo(label) {
   while (true) {
     const ans = (await _question(label)).toLowerCase();
@@ -522,6 +578,8 @@ module.exports = {
   printBanner,
   promptToken,
   promptUserId,
+  promptStartMenu,
+  promptFolderSelect,
   promptServerSelect,
   promptMenu,
   promptYesNo,

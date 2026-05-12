@@ -20,18 +20,23 @@ async function discordAPI(apiPath) {
 
   if (res.status === 429) {
     const { setCatMood } = require('./terminal');
+    const CLOCK = ['◴', '◷', '◶', '◵'];
 
     const waitMs = RATE_LIMIT_WAIT_MS;
     const total  = waitMs / 1000;
     const start  = Date.now();
+    let   frame  = 0;
 
     setCatMood('sad');
 
     const rlIv = setInterval(() => {
-      const elapsed   = Math.floor((Date.now() - start) / 1000);
-      const remaining = Math.max(0, total - elapsed);
-      serverSubSet('⟳  rate limited — resuming in ' + remaining + 's');
-    }, 500);
+      const remaining = Math.max(0, total - Math.floor((Date.now() - start) / 1000));
+      const mins      = Math.floor(remaining / 60);
+      const secs      = remaining % 60;
+      const timeStr   = mins > 0 ? mins + ':' + String(secs).padStart(2, '0') : secs + 's';
+      serverSubSet(CLOCK[frame % CLOCK.length] + '  ' + timeStr);
+      frame++;
+    }, 250);
 
     await delay(waitMs);
     clearInterval(rlIv);
@@ -42,9 +47,6 @@ async function discordAPI(apiPath) {
 
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
-    const body = await res.text();
-    statusLog('  ✗  unexpected response (HTTP ' + res.status + ') — skipping this request');
-    statusLog('     hint: ' + body.slice(0, 120).replace(/[\r\n]+/g, ' ').trim() + '...');
     return { code: res.status, message: 'non-JSON response (HTTP ' + res.status + ')' };
   }
 

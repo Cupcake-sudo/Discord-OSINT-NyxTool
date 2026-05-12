@@ -177,15 +177,22 @@ function renderMentioners(mentioners, targetId) {
 const PAGE_SIZE = 500;
 
 
+function termRegex(t, flags) {
+  const esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pre = /^\w/.test(t) ? '\\b' : '';
+  const suf = /\w$/.test(t) ? '\\b' : '';
+  return new RegExp(pre + esc + suf, flags || 'i');
+}
+
 function filterByIntel(items, category) {
   const terms = INTEL_WORDLISTS[category] || [];
   return items.filter((m) => {
     const text = (m.content || '').toLowerCase();
-    return terms.some((t) => text.includes(t));
+    return terms.some((t) => termRegex(t).test(text));
   });
 }
 
-function buildHTML(data, mode, page, intelFilter, mentionsData) {
+function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData) {
   page = page || 0;
   const isMentions = mode === 'mentions';
   let allItems     = (isMentions ? data.mentions : data.messages) || [];
@@ -246,6 +253,26 @@ function buildHTML(data, mode, page, intelFilter, mentionsData) {
     mentionRankHtml = renderMentioners(mentionsData.mentioners || [], data.userId);
   }
 
+  const CAT_COLORS_SS = {
+    location:'#7dd3fc', economics:'#4ade80', identity:'#f87171',
+    social:'#c084fc', activities:'#fb923c', technical:'#facc15',
+    criminal:'#ff4d4d', physical:'#a3e635', credentials:'#f43f5e', places:'#38bdf8',
+  };
+  const termsPanelHtml = '<div id="terms-overlay" class="terms-overlay hidden"></div>' +
+    '<div id="terms-panel" class="terms-panel hidden">' +
+    '<div class="terms-hd"><span>WORDLIST</span><button class="terms-cls">✕</button></div>' +
+    '<div class="terms-bd">' +
+    Object.entries(INTEL_WORDLISTS).map(([cat, terms]) => {
+      const color = CAT_COLORS_SS[cat] || '#aaa';
+      return '<div class="tcat"><div class="tcat-lbl" style="color:' + color + '">' +
+        escapeHtml(cat.toUpperCase()) + '<span class="tcnt">' + terms.length + '</span></div>' +
+        '<div class="tchips">' +
+        terms.map(t => '<span class="tchip" data-cat="' + escapeHtml(cat) + '" data-term="' + escapeHtml(t) +
+          '" style="border-color:' + color + ';color:' + color + '">' + escapeHtml(t) + '</span>').join('') +
+        '</div></div>';
+    }).join('') +
+    '</div></div>';
+
   const totalLine = isMentions
     ? (totalCount + ' mentions  ·  ' + (data.mentioners ? data.mentioners.length : 0) + ' unique senders')
     : (totalCount + ' messages  ·  ' + (allItems || []).reduce((n, m) => n + (m.files ? m.files.length : 0), 0) + ' files');
@@ -279,6 +306,27 @@ function buildHTML(data, mode, page, intelFilter, mentionsData) {
   const layout = '<div class="layout' + (rank ? ' has-rank' : '') + '" id="msg-layout"><main id="main-feed">' + sectionParts.join('\n') + '</main>' + rank + '</div>' +
     (hasMentionsFeed ? '<div class="layout' + (mentionRankHtml ? ' has-rank' : '') + ' hidden" id="mention-layout"><main id="mention-feed">' + mentionFeedHtml + '</main>' + mentionRankHtml + '</div>' : '');
 
+  let hmHtml = '';
+  let hmBtn  = '';
+  if (heatmapData && heatmapData.buckets && heatmapData.buckets.length) {
+    const hmMax    = Math.max(...heatmapData.buckets.map(b => b.count), 1);
+    const top5     = new Set([...heatmapData.buckets].sort((a, b) => b.count - a.count).slice(0, 5).map(b => b.startHour));
+    const hmRows   = heatmapData.buckets.map(b => {
+      const pct  = Math.round(b.count / hmMax * 100);
+      const top  = top5.has(b.startHour) ? ' hm-top' : '';
+      return '<div class="hm-row"><span class="hm-lbl">' + escapeHtml(b.label) + '</span>' +
+        '<div class="hm-bar-wrap"><div class="hm-bar' + top + '" style="width:' + pct + '%"></div>' +
+        '<span class="hm-cnt">' + b.count + '</span></div></div>';
+    }).join('');
+    hmHtml = '<div id="heatmap-section" class="hidden"><div class="hm-wrap">' +
+      '<div class="hm-meta"><span>timezone · ' + escapeHtml(heatmapData.timezone) + '</span>' +
+      '<span>' + heatmapData.total + ' messages</span></div>' +
+      '<div class="hm-chart">' + hmRows + '</div></div></div>';
+    hmBtn = '<button class="fbtn" data-main="heatmap">Heatmap</button>';
+  }
+
+  const wordsBtn = '<button class="fbtn" id="terms-toggle" style="margin-left:auto">⚙ words</button>';
+
   const mentionsTabBtn = hasMentionsFeed
     ? '<button class="fbtn" data-main="mentions">Mentions <span style="opacity:.5;font-size:10px">' + (mentionsData.mentions || []).length + '</span></button>'
     : '';
@@ -291,6 +339,7 @@ function buildHTML(data, mode, page, intelFilter, mentionsData) {
     <button class="fbtn" data-main="messages">Messages</button>
     <button class="fbtn" data-main="files">Files</button>
     ${mentionsTabBtn}
+    ${hmBtn}
   </div>
   <div class="sub-row" id="sub-row">
     <span class="label">Type</span>
@@ -308,6 +357,11 @@ function buildHTML(data, mode, page, intelFilter, mentionsData) {
     <button class="fbtn" data-intel="social">Social<span class="cnt"></span></button>
     <button class="fbtn" data-intel="activities">Activities<span class="cnt"></span></button>
     <button class="fbtn" data-intel="technical">Technical<span class="cnt"></span></button>
+    <button class="fbtn" data-intel="criminal">Criminal<span class="cnt"></span></button>
+    <button class="fbtn" data-intel="physical">Physical<span class="cnt"></span></button>
+    <button class="fbtn" data-intel="credentials">Credentials<span class="cnt"></span></button>
+    <button class="fbtn" data-intel="places">Places<span class="cnt"></span></button>
+    ${wordsBtn}
   </div>
 </div>
 <script>
@@ -317,6 +371,11 @@ document.addEventListener('DOMContentLoaded',function(){
   var main = 'all';
   var sub  = 'all';
   var intel = null;
+
+  var disabledTerms = new Set();
+  function getActiveIntel(cat) {
+    return (INTEL[cat] || []).filter(function(t) { return !disabledTerms.has(cat + ':' + t); });
+  }
 
   var BADGE_COLORS = {
     location:'#7dd3fc', economics:'#4ade80', identity:'#f87171',
@@ -351,15 +410,22 @@ document.addEventListener('DOMContentLoaded',function(){
     });
   }
 
+  function mkre(t, flags) {
+    var esc = t.replace(/[.*+?^\${}()|[\]\\]/g,'\\$&');
+    var pre = /^\w/.test(t) ? '\\b' : '';
+    var suf = /\w$/.test(t) ? '\\b' : '';
+    return new RegExp(pre + esc + suf, flags || 'i');
+  }
+
   function scanIntel() {
     document.querySelectorAll('.msg').forEach(function(card) {
       var body = card.querySelector('.body');
       var text = body ? body.textContent.toLowerCase() : '';
       var matched = [];
       Object.keys(INTEL).forEach(function(cat) {
-        var terms = INTEL[cat];
+        var terms = getActiveIntel(cat);
         for (var i = 0; i < terms.length; i++) {
-          if (text.indexOf(terms[i].toLowerCase()) > -1) { matched.push(cat); break; }
+          if (mkre(terms[i].toLowerCase()).test(text)) { matched.push(cat); break; }
         }
       });
       card.dataset.intel = matched.join(' ');
@@ -384,12 +450,14 @@ document.addEventListener('DOMContentLoaded',function(){
       if (!cats.length) { body.textContent = orig; return; }
       var html = orig.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       var terms = [];
-      cats.forEach(function(c) { terms = terms.concat(INTEL[c] || []); });
+      cats.forEach(function(c) { terms = terms.concat(getActiveIntel(c)); });
       terms = terms.filter(function(t,i,a){return a.indexOf(t)===i;});
       terms.sort(function(a,b){return b.length-a.length;});
       terms.forEach(function(term) {
-        var re = new RegExp('('+term.replace(/[.*+?^\${}()|[\]\\]/g,'\\$&')+')','gi');
-        html = html.replace(re,'<mark class="hl">$1</mark>');
+        var esc = term.replace(/[.*+?^\${}()|[\]\\]/g,'\\$&');
+        var pre = /^\w/.test(term) ? '\\b' : '';
+        var suf = /\w$/.test(term) ? '\\b' : '';
+        html = html.replace(new RegExp(pre+'('+esc+')'+suf,'gi'),'<mark class="hl">$1</mark>');
       });
       body.innerHTML = html;
     });
@@ -430,16 +498,28 @@ document.addEventListener('DOMContentLoaded',function(){
       var subRow      = document.getElementById('sub-row');
       var msgLayout   = document.getElementById('msg-layout');
       var mentionLayout = document.getElementById('mention-layout');
-      if (main === 'mentions') {
-        if (msgLayout)    msgLayout.classList.add('hidden');
-        if (mentionLayout) mentionLayout.classList.remove('hidden');
-        if (subRow)       subRow.classList.remove('visible');
-      } else {
-        if (msgLayout)    msgLayout.classList.remove('hidden');
+      var hmSection = document.getElementById('heatmap-section');
+      var intelRowEl = document.querySelector('.intel-row');
+      if (main === 'heatmap') {
+        if (msgLayout)     msgLayout.classList.add('hidden');
         if (mentionLayout) mentionLayout.classList.add('hidden');
-        if (main === 'files') subRow.classList.add('visible');
-        else subRow.classList.remove('visible');
-        applyFilter();
+        if (hmSection)     hmSection.classList.remove('hidden');
+        if (intelRowEl)    intelRowEl.style.display = 'none';
+        if (subRow)        subRow.classList.remove('visible');
+      } else {
+        if (hmSection)     hmSection.classList.add('hidden');
+        if (intelRowEl)    intelRowEl.style.display = '';
+        if (main === 'mentions') {
+          if (msgLayout)     msgLayout.classList.add('hidden');
+          if (mentionLayout) mentionLayout.classList.remove('hidden');
+          if (subRow)        subRow.classList.remove('visible');
+        } else {
+          if (msgLayout)     msgLayout.classList.remove('hidden');
+          if (mentionLayout) mentionLayout.classList.add('hidden');
+          if (main === 'files') subRow.classList.add('visible');
+          else subRow.classList.remove('visible');
+          applyFilter();
+        }
       }
     });
   });
@@ -477,6 +557,54 @@ document.addEventListener('DOMContentLoaded',function(){
     highlightIntel(null);
   }
 
+  function rescan() {
+    document.querySelectorAll('.msg').forEach(function(card) {
+      var body = card.querySelector('.body');
+      var text = body ? body.textContent.toLowerCase() : '';
+      var matched = [];
+      Object.keys(INTEL).forEach(function(cat) {
+        var terms = getActiveIntel(cat);
+        for (var i = 0; i < terms.length; i++) {
+          if (mkre(terms[i].toLowerCase()).test(text)) { matched.push(cat); break; }
+        }
+      });
+      card.dataset.intel = matched.join(' ');
+    });
+    Object.keys(INTEL).forEach(function(cat) {
+      var btn = document.querySelector('.fbtn[data-intel="' + cat + '"]');
+      if (!btn) return;
+      var count = document.querySelectorAll('.msg[data-intel~="' + cat + '"]').length;
+      var cnt = btn.querySelector('.cnt');
+      if (cnt) cnt.textContent = count ? ' ' + count : '';
+    });
+    addIntelBadges();
+    var curIntel = new URLSearchParams(window.location.search).get('intel');
+    highlightIntel(curIntel || null);
+    applyFilter();
+  }
+
+  // terms panel
+  var termsPanel   = document.getElementById('terms-panel');
+  var termsOverlay = document.getElementById('terms-overlay');
+  var termsToggle  = document.getElementById('terms-toggle');
+
+  function openTerms()  { if (termsPanel) termsPanel.classList.remove('hidden'); if (termsOverlay) termsOverlay.classList.remove('hidden'); }
+  function closeTerms() { if (termsPanel) termsPanel.classList.add('hidden');    if (termsOverlay) termsOverlay.classList.add('hidden'); }
+
+  if (termsToggle)  termsToggle.addEventListener('click', openTerms);
+  if (termsOverlay) termsOverlay.addEventListener('click', closeTerms);
+  var termsCls = document.querySelector('.terms-cls');
+  if (termsCls) termsCls.addEventListener('click', closeTerms);
+
+  document.querySelectorAll('.tchip').forEach(function(chip) {
+    chip.addEventListener('click', function() {
+      var key = chip.dataset.cat + ':' + chip.dataset.term;
+      if (disabledTerms.has(key)) { disabledTerms.delete(key); chip.classList.remove('off'); }
+      else                         { disabledTerms.add(key);    chip.classList.add('off'); }
+      rescan();
+    });
+  });
+
   document.querySelectorAll('.rank li[data-id]').forEach(function(li) {
     li.addEventListener('click', function() {
       var id = li.dataset.id;
@@ -505,7 +633,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
   const foot = '<div class="foot"><span>nyx · case archive</span><span class="nyx">(=^ ◕ω◕ ^=)</span></div>';
 
-  return head + '<div class="frame">' + '<div class="top">' + stamp + targetBlock + '</div>' + statsBlock + pagerBlock + filterBar + layout + (totalPages > 1 ? pagerBlock : '') + foot + '</div></body></html>';
+  return head + '<div class="frame">' + '<div class="top">' + stamp + targetBlock + '</div>' + statsBlock + pagerBlock + filterBar + layout + hmHtml + (totalPages > 1 ? pagerBlock : '') + foot + '</div>' + termsPanelHtml + '</body></html>';
 }
 
 async function launchViewer(outDir, mode) {
@@ -526,6 +654,10 @@ async function launchViewer(outDir, mode) {
     if (fs.existsSync(mf)) mentionsData = JSON.parse(fs.readFileSync(mf, 'utf8'));
   }
 
+  let heatmapData = null;
+  const hmf = path.join(outDir, 'heatmap.json');
+  if (fs.existsSync(hmf)) heatmapData = JSON.parse(fs.readFileSync(hmf, 'utf8'));
+
   const server = http.createServer((req, res) => {
     const parsedUrl = new URL((req.url || '/'), 'http://localhost');
     const pathname  = decodeURIComponent(parsedUrl.pathname);
@@ -539,7 +671,7 @@ async function launchViewer(outDir, mode) {
     if (pathname === '/' || pathname === '/index.html') {
       const page  = parseInt(parsedUrl.searchParams.get('page') || '0', 10) || 0;
       const intel = parsedUrl.searchParams.get('intel') || null;
-      const html  = buildHTML(data, mode, page, intel, mentionsData);
+      const html  = buildHTML(data, mode, page, intel, mentionsData, heatmapData);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);
       return;

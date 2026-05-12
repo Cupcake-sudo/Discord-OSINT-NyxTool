@@ -77,7 +77,7 @@ async function searchGuildForMentions(guildId, guildName, onTargetResolved, onPr
       const rawMentions    = (msg.mentions || []).filter((u) => u.id === constants.TARGET_USER_ID);
       if (!targetResolved && rawMentions.length > 0) {
         const tag = formatUserTag(rawMentions[0]);
-        if (tag) { await onTargetResolved(tag); targetResolved = true; }
+        if (tag) { await onTargetResolved(tag, rawMentions[0]); targetResolved = true; }
       }
       const mentionedUsers = rawMentions.map((u) => ({ id: u.id, tag: formatUserTag(u), avatar: u.avatar || null }));
 
@@ -173,7 +173,7 @@ async function searchGuildForFiles(guildId, guildName, filesDir, onFirstAuthor, 
 
       if (!authorSent && msg.author && msg.author.id === constants.TARGET_USER_ID) {
         const name = extractUsernameFromMessage(msg);
-        if (name) { await onFirstAuthor(name); authorSent = true; }
+        if (name) { await onFirstAuthor(name, msg.author); authorSent = true; }
       }
 
       const fileUrls   = extractFileUrls(msg);
@@ -287,7 +287,7 @@ async function searchGuildForUser(guildId, guildName, filesDir, onFirstAuthor, o
 
       if (!authorSent && msg.author && msg.author.id === constants.TARGET_USER_ID) {
         const name = extractUsernameFromMessage(msg);
-        if (name) { await onFirstAuthor(name); authorSent = true; }
+        if (name) { await onFirstAuthor(name, msg.author); authorSent = true; }
       }
 
       const fileUrls   = extractFileUrls(msg);

@@ -35,9 +35,13 @@ async function downloadFile(url, destDir, messageContext) {
     const destPath = path.join(categoryDir, filename);
     if (fs.existsSync(destPath)) return destPath;
     
-    const res = await fetch(url);
+    const res = await fetch(url, { timeout: 30000 });
     if (!res.ok) return null;
-    fs.writeFileSync(destPath, await res.buffer());
+    const buf = await Promise.race([
+      res.buffer(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('body timeout')), 30000)),
+    ]);
+    fs.writeFileSync(destPath, buf);
     return destPath;
   } catch {
     return null;

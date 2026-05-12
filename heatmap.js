@@ -86,6 +86,12 @@ async function printAndSaveHeatmap(messages, outDir, username) {
   txt += '\n' + '═'.repeat(64) + '\n';
 
   fs.writeFileSync(path.join(outDir, 'heatmap.txt'), txt);
+
+  const byHourChron = [...allSorted].sort((a, b) => a.startHour - b.startHour);
+  fs.writeFileSync(path.join(outDir, 'heatmap.json'), JSON.stringify({
+    user: username, timezone: SYSTEM_TZ, total: messages.length,
+    buckets: byHourChron,
+  }, null, 2));
 }
 
 module.exports = { printAndSaveHeatmap };
