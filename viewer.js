@@ -192,7 +192,7 @@ function filterByIntel(items, category) {
   });
 }
 
-function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData, timelineData) {
+function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData, timelineData, profileData) {
   page = page || 0;
   const isMentions = mode === 'mentions';
   let allItems     = (isMentions ? data.mentions : data.messages) || [];
@@ -298,7 +298,62 @@ function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData, tim
 
   const stamp = '<div class="stamp">CASE FILE<span class="sep">·</span>' + escapeHtml((data.mode || mode).toUpperCase()) + '<span class="sep">·</span>SCRAPED ' + escapeHtml(new Date().toISOString().slice(0, 19).replace('T', ' ')) + ' UTC</div>';
 
-  const targetBlock = '<div class="target"><img src="' + escapeHtml(targetAv) + '" alt=""><div><h1><span class="at">▸</span> ' + escapeHtml(data.username || '—') + '</h1><div class="id"><b>ID</b> ' + escapeHtml(data.userId) + '</div></div></div>';
+  const pd = profileData || {};
+  let profExtra = '';
+  if (pd.pronouns)  profExtra += '<div class="prof-line">' + escapeHtml(pd.pronouns) + '</div>';
+  if (pd.bio)       profExtra += '<div class="prof-line prof-bio">' + escapeHtml(pd.bio.replace(/\n/g, ' ').slice(0, 120)) + '</div>';
+  if (pd.badges && pd.badges.length) {
+    const BADGE_MAP = { premium:'Nitro', legacy_username:'Legacy Username', verified_developer:'Verified Dev',
+      active_developer:'Active Dev', bug_hunter_level_1:'Bug Hunter', bug_hunter_level_2:'Bug Hunter Gold',
+      partner:'Partner', staff:'Staff', certified_moderator:'Certified Mod',
+      hypesquad_house_1:'Bravery', hypesquad_house_2:'Brilliance', hypesquad_house_3:'Balance',
+      quest_completed:'Quest', orb_profile_badge:'Orb' };
+    const badgeChips = pd.badges.map(id => {
+      const lvl = id.match(/guild_booster_lvl(\d+)/);
+      const ten = id.match(/premium_tenure_(\d+)_month/);
+      const label = lvl ? 'Booster L'+lvl[1] : ten ? 'Nitro '+ten[1]+'mo' : (BADGE_MAP[id] || id.replace(/_/g,' '));
+      return '<span class="badge-chip">' + escapeHtml(label) + '</span>';
+    }).join('');
+    profExtra += '<div class="badge-list">' + badgeChips + '</div>';
+  }
+  if (pd.mutualGuilds && pd.mutualGuilds.length) {
+    const gchips = pd.mutualGuilds.map(mg => {
+      const name = mg.name || mg.id;
+      const label = escapeHtml(name) + (mg.nick ? ' <span class="mg-nick">(' + escapeHtml(mg.nick) + ')</span>' : '');
+      return '<span class="mg-chip">' + label + '</span>';
+    }).join('');
+    profExtra += '<div class="mg-label">Mutual Servers</div><div class="ca-list">' + gchips + '</div>';
+  }
+
+  if (pd.connectedAccounts && pd.connectedAccounts.length) {
+    function caUrl(a) {
+      const n = a.name || '', id = a.id || '';
+      switch (a.type) {
+        case 'github':        return 'https://github.com/' + n;
+        case 'twitter':       return 'https://x.com/' + n;
+        case 'twitch':        return 'https://twitch.tv/' + n;
+        case 'youtube':       return 'https://youtube.com/@' + n;
+        case 'reddit':        return 'https://reddit.com/u/' + n;
+        case 'tiktok':        return 'https://tiktok.com/@' + n;
+        case 'instagram':     return 'https://instagram.com/' + n;
+        case 'steam':         return id ? 'https://steamcommunity.com/profiles/' + id : 'https://steamcommunity.com/id/' + n;
+        case 'spotify':       return id ? 'https://open.spotify.com/user/' + id : null;
+        case 'roblox':        return id ? 'https://www.roblox.com/users/' + id + '/profile' : null;
+        case 'domain':        return n.startsWith('http') ? n : 'https://' + n;
+        case 'ebay':          return 'https://www.ebay.com/usr/' + n;
+        default:              return null;
+      }
+    }
+    const chips = pd.connectedAccounts.map(a => {
+      const url = caUrl(a);
+      const inner = escapeHtml(a.label) + ' · ' + escapeHtml(a.name);
+      return url
+        ? '<a class="ca-chip" href="' + escapeHtml(url) + '" target="_blank" rel="noreferrer">' + inner + '</a>'
+        : '<span class="ca-chip">' + inner + '</span>';
+    }).join('');
+    profExtra += '<div class="ca-list">' + chips + '</div>';
+  }
+  const targetBlock = '<div class="target"><img src="' + escapeHtml(targetAv) + '" alt=""><div><h1><span class="at">▸</span> ' + escapeHtml(data.username || '—') + '</h1><div class="id"><b>ID</b> ' + escapeHtml(data.userId) + '</div>' + profExtra + '</div></div>';
 
   const statsBlock = '<div class="stats"><div><div class="k">Operation</div><div class="v">' + escapeHtml(data.mode || mode) + '</div></div><div><div class="k">Volume</div><div class="v">' + escapeHtml(totalLine) + '</div></div><div><div class="k">Servers</div><div class="v">' + Object.keys(grouped).length + '</div></div></div>';
 
@@ -788,6 +843,10 @@ async function launchViewer(outDir, mode) {
   const tlf = path.join(outDir, 'timeline.json');
   if (fs.existsSync(tlf)) timelineData = JSON.parse(fs.readFileSync(tlf, 'utf8'));
 
+  let profileData = null;
+  const prf = path.join(outDir, 'profile.json');
+  if (fs.existsSync(prf)) profileData = JSON.parse(fs.readFileSync(prf, 'utf8'));
+
   const server = http.createServer((req, res) => {
     const parsedUrl = new URL((req.url || '/'), 'http://localhost');
     const pathname  = decodeURIComponent(parsedUrl.pathname);
@@ -801,7 +860,7 @@ async function launchViewer(outDir, mode) {
     if (pathname === '/' || pathname === '/index.html') {
       const page  = parseInt(parsedUrl.searchParams.get('page') || '0', 10) || 0;
       const intel = parsedUrl.searchParams.get('intel') || null;
-      const html  = buildHTML(data, mode, page, intel, mentionsData, heatmapData, timelineData);
+      const html  = buildHTML(data, mode, page, intel, mentionsData, heatmapData, timelineData, profileData);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);
       return;

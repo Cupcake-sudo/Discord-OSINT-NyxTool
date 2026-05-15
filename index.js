@@ -120,6 +120,28 @@ async function main() {
 
   term.setCatMood('hunting');
 
+  function formatBadge(id) {
+    const lvl = id.match(/guild_booster_lvl(\d+)/);
+    if (lvl) return 'Booster L' + lvl[1];
+    const MAP = {
+      premium: 'Nitro', legacy_username: 'Legacy Username',
+      verified_developer: 'Verified Dev', active_developer: 'Active Dev',
+      bug_hunter_level_1: 'Bug Hunter', bug_hunter_level_2: 'Bug Hunter Gold',
+      partner: 'Partner', staff: 'Staff', certified_moderator: 'Certified Mod',
+      hypesquad_house_1: 'HypeSquad Bravery', hypesquad_house_2: 'HypeSquad Brilliance',
+      hypesquad_house_3: 'HypeSquad Balance', quest_completed: 'Quest', orb_profile_badge: 'Orb',
+    };
+    const tenure = id.match(/premium_tenure_(\d+)_month/);
+    if (tenure) return 'Nitro ' + tenure[1] + 'mo';
+    return MAP[id] || id.replace(/_/g, ' ');
+  }
+
+  function fmtYearMonth(iso) {
+    const d = new Date(iso);
+    const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return d.getFullYear() + ' ' + MONTHS[d.getMonth()];
+  }
+
   let profileShown = false;
 
   async function showTargetProfile(usernameOverride, authorObj) {
@@ -143,19 +165,41 @@ async function main() {
       term.statusLog('  display name:        ' + displayName);
     }
     term.statusLog('  username:            ' + username);
+    if (prof && prof.legacyUsername) term.statusLog('  legacy username:     ' + prof.legacyUsername);
     term.statusLog('  joined discord:      ' + formatSnowflakeDate(TARGET_USER_ID));
-    if (prof && prof.bio) term.statusLog('  bio:                 ' + prof.bio.replace(/\n/g, ' ').slice(0, 80));
+    if (prof && prof.pronouns)  term.statusLog('  pronouns:            ' + prof.pronouns);
+    if (prof && prof.bio)       term.statusLog('  bio:                 ' + prof.bio.replace(/\n/g, ' ').slice(0, 80));
+    if (prof && prof.premiumSince)      term.statusLog('  nitro since:         ' + fmtYearMonth(prof.premiumSince));
+    if (prof && prof.premiumGuildSince) term.statusLog('  boosting since:      ' + fmtYearMonth(prof.premiumGuildSince));
+    if (prof && prof.badges && prof.badges.length > 0) {
+      term.statusLog('  badges:              ' + prof.badges.map(formatBadge).join('  ·  '));
+    }
     if (prof && prof.mutualFriendsCount !== null) term.statusLog('  mutual friends:      ' + prof.mutualFriendsCount);
     if (prof && prof.mutualGuilds && prof.mutualGuilds.length > 0) {
       term.statusLog('  mutual servers:      ' + prof.mutualGuilds.length);
+      for (const mg of prof.mutualGuilds) {
+        const g    = guilds.find(x => x.id === mg.id);
+        const name = g ? (stripEmoji(g.name) || mg.id) : mg.id;
+        term.statusLog('    ·  ' + name + (mg.nick ? '  (nick: ' + mg.nick + ')' : ''));
+      }
+    }
+    if (prof && prof.connectedAccounts && prof.connectedAccounts.length > 0) {
+      for (const acc of prof.connectedAccounts) {
+        term.statusLog('  ' + (acc.label + ':').padEnd(21) + acc.name);
+      }
     }
     return prof;
   }
 
+  let resolvedUsername = null;
+  let resolvedAvatar   = null;
+
   term.statusSet('picking up the scent...');
-  const profile        = await showTargetProfile(null);
-  let resolvedUsername = profile ? profile.tag : null;
-  let resolvedAvatar   = profile ? profile.avatar : null;
+  const profile = await showTargetProfile(null);
+  if (profile) {
+    if (!resolvedUsername) resolvedUsername = profile.tag;
+    if (!resolvedAvatar)   resolvedAvatar   = profile.avatar;
+  }
   await term.delay(1500);
 
   const tmpDir = '_tmp_' + TARGET_USER_ID;
@@ -271,6 +315,16 @@ async function main() {
 
   ensureDir(outDir);
   if (DOWNLOAD_FILES) ensureDir(filesDir);
+  if (profile) {
+    const enriched = Object.assign({}, profile);
+    if (profile.mutualGuilds && profile.mutualGuilds.length) {
+      enriched.mutualGuilds = profile.mutualGuilds.map(mg => {
+        const g = guilds.find(x => x.id === mg.id);
+        return Object.assign({}, mg, { name: g ? (stripEmoji(g.name) || mg.id) : mg.id });
+      });
+    }
+    fs.writeFileSync(path.join(outDir, 'profile.json'), JSON.stringify(enriched, null, 2));
+  }
 
   if (DOWNLOAD_FILES && !MENTION_ONLY_MODE && fs.existsSync(tmpDir)) {
     moveTmpFiles(tmpDir, filesDir);
@@ -437,7 +491,10 @@ if (process.argv[2] === '--view') {
 } else {
   main().catch((err) => {
     try { require('./terminal').stopHeader(); } catch {}
-    console.error('\n  ✗  fatal error: ' + err.message);
+    const msg = (err && err.stack) ? err.stack : String(err);
+    try { require('fs').writeFileSync('nyx_error.log', msg + '\n'); } catch {}
+    console.error('\n  ✗  fatal error: ' + (err && err.message ? err.message : err));
+    console.error('  (details saved to nyx_error.log)');
     process.exit(1);
   });
 }

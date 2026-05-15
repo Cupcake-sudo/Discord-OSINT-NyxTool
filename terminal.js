@@ -9,13 +9,14 @@ const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 const DIM  = '\x1b[2m';
 const BOLD = '\x1b[1m';
 
-let _catFrame   = 0;
-let _catMood    = 'idle';
-let _statusMsg  = 'warming up...';
-let _headerIv   = null;
-let _outputLine = 1;
-let _catLine    = null;
-let _flatOutput = false;
+let _catFrame      = 0;
+let _catMood       = 'idle';
+let _statusMsg     = 'warming up...';
+let _headerIv      = null;
+let _outputLine    = 1;
+let _catLine       = null;
+let _flatOutput    = false;
+let _bannerStartLine = 1;
 
 const LOGO_COLOURS = [
   '\x1b[38;5;240m',
@@ -98,13 +99,34 @@ function updateHeader() {
   const maxMsgLen = Math.max(10, (process.stdout.columns || 80) - catW - 10);
   const safeMsg   = String(_statusMsg).replace(/[\r\n]/g, ' ').slice(0, maxMsgLen);
 
-  process.stdout.write(
-    SAVE_CURSOR +
+  let out = SAVE_CURSOR;
+
+  // cycle banner colours in sync with the cat
+  if (_bannerPrinted) {
+    let row = _bannerStartLine;
+    let pos = 0;
+    for (const line of _BANNER_LINES) {
+      out += moveCursor(row, 1) + CLEAR_LINE;
+      if (line !== '') {
+        let s = '  ';
+        for (const ch of line) {
+          const ci = (pos + _catFrame) % BANNER_COLOURS.length;
+          s += BANNER_COLOURS[ci] + ch + RESET;
+          pos++;
+        }
+        out += s;
+      }
+      row++;
+    }
+  }
+
+  out +=
     moveCursor(_catSepAbove, 1) + CLEAR_LINE + '  ' + col + '╭' + bar + '╮' + RESET +
     moveCursor(_catLine,     1) + CLEAR_LINE + '  ' + col + '│' + c + '│' + RESET + '  ' + DIM + safeMsg + RESET +
     moveCursor(_catSepBelow, 1) + CLEAR_LINE + '  ' + col + '╰' + bar + '╯' + RESET +
-    RESTORE_CURSOR
-  );
+    RESTORE_CURSOR;
+
+  process.stdout.write(out);
   _catFrame++;
 }
 
@@ -280,27 +302,40 @@ async function printResults(rows, folderPath) {
 
 async function printBanner() {
   _bannerStartLine = _outputLine;
-  let colorIdx = 0;
 
+  // precompute cumulative char offset at the start of each line
+  const linePos = [];
+  let cum = 0;
   for (const line of _BANNER_LINES) {
-    if (line === '') {
-      _outputLine++;
-      await delay(40);
-      continue;
-    }
+    linePos.push(cum);
+    if (line !== '') for (const _ of line) cum++;
+  }
 
-    let built = '  ';
-    process.stdout.write(SAVE_CURSOR + moveCursor(_outputLine, 1) + CLEAR_LINE + RESTORE_CURSOR);
-
+  function renderLine(li, frame) {
+    const line = _BANNER_LINES[li];
+    if (line === '') return '';
+    let s = '  ', p = linePos[li];
     for (const ch of line) {
-      const col = LOGO_COLOURS[colorIdx % LOGO_COLOURS.length];
-      colorIdx++;
-      built += col + ch + RESET;
-      process.stdout.write(SAVE_CURSOR + moveCursor(_outputLine, 1) + CLEAR_LINE + built + RESTORE_CURSOR);
-      await delay(2);
+      s += BANNER_COLOURS[(p++ + frame) % BANNER_COLOURS.length] + ch + RESET;
     }
+    return s;
+  }
+
+  let linesDrawn = 0;
+
+  for (let li = 0; li < _BANNER_LINES.length; li++) {
+    _catFrame++;
+    // repaint every already-printed line + draw the new one
+    let out = SAVE_CURSOR;
+    let row = _bannerStartLine;
+    for (let pi = 0; pi < linesDrawn; pi++) {
+      out += moveCursor(row++, 1) + CLEAR_LINE + renderLine(pi, _catFrame);
+    }
+    out += moveCursor(row, 1) + CLEAR_LINE + renderLine(li, _catFrame) + RESTORE_CURSOR;
+    process.stdout.write(out);
     _outputLine++;
-    await delay(18);
+    linesDrawn++;
+    await delay(_BANNER_LINES[li] === '' ? 6 : 22);
   }
 
   _outputLine++;
@@ -529,7 +564,7 @@ function _redrawAll() {
     if (line === '') { _outputLine++; continue; }
     let built = '  ';
     for (const ch of line) {
-      built += LOGO_COLOURS[colorIdx % LOGO_COLOURS.length] + ch + RESET;
+      built += BANNER_COLOURS[(colorIdx + _catFrame) % BANNER_COLOURS.length] + ch + RESET;
       colorIdx++;
     }
     process.stdout.write(moveCursor(_outputLine, 1) + CLEAR_LINE + built);
