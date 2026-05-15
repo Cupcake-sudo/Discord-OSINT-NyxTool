@@ -105,7 +105,7 @@ async function main() {
   const path = require('path');
   const { sanitizeName, stripEmoji }                        = require('./utils');
   const { resolveProfile }                                  = require('./api');
-  const { printAndSaveHeatmap }                             = require('./heatmap');
+  const { printAndSaveHeatmap, saveTimeline }               = require('./heatmap');
   const { ensureDir, moveTmpFiles }                         = require('./fileHandler');
   const { searchGuildForMentions, searchGuildForFiles, searchGuildForUser } = require('./search');
   const {
@@ -326,6 +326,8 @@ async function main() {
     term.stopHeader();
     await term.printResults(rows, './' + outDir + '/');
   }
+
+  if (allMessages.length > 0) saveTimeline(allMessages, outDir, finalUsername);
 
   if (MODE_HEATMAP && allMessages.length > 0) {
     await printAndSaveHeatmap(allMessages, outDir, finalUsername);

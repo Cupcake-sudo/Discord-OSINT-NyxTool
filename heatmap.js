@@ -94,4 +94,35 @@ async function printAndSaveHeatmap(messages, outDir, username) {
   }, null, 2));
 }
 
-module.exports = { printAndSaveHeatmap };
+function buildTimeline(messages) {
+  const counts = {};
+  for (const msg of messages) {
+    if (!msg.timestamp) continue;
+    const d   = new Date(msg.timestamp);
+    const key = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  const keys = Object.keys(counts).sort();
+  if (!keys.length) return [];
+  const [sy, sm] = keys[0].split('-').map(Number);
+  const [ey, em] = keys[keys.length - 1].split('-').map(Number);
+  const result = [];
+  let y = sy, m = sm;
+  while (y < ey || (y === ey && m <= em)) {
+    const key = y + '-' + String(m).padStart(2, '0');
+    result.push({ month: key, count: counts[key] || 0 });
+    if (++m > 12) { m = 1; y++; }
+  }
+  return result;
+}
+
+function saveTimeline(messages, outDir, username) {
+  if (!messages || !messages.length) return;
+  const buckets = buildTimeline(messages);
+  if (!buckets.length) return;
+  fs.writeFileSync(path.join(outDir, 'timeline.json'), JSON.stringify({
+    user: username, total: messages.length, buckets,
+  }, null, 2));
+}
+
+module.exports = { printAndSaveHeatmap, saveTimeline };

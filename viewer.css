@@ -212,3 +212,13 @@ mark.hl { background: rgba(255,220,60,.18); color: inherit; border-radius: 1px; 
 }
 .tchip:hover { opacity: .85 }
 .tchip.off { opacity: .18; filter: grayscale(1) }
+
+#timeline-section { margin-top: 0 }
+.tl-meta { display: flex; gap: 24px; margin-bottom: 16px; font-size: 11px; color: var(--ink-mute); letter-spacing: .1em; flex-wrap: wrap }
+.tl-scroll { overflow-x: auto; padding-bottom: 6px }
+.tl-scroll::-webkit-scrollbar { height: 4px }
+.tl-scroll::-webkit-scrollbar-track { background: var(--bg) }
+.tl-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px }
+#tl-canvas { display: block; cursor: crosshair }
+.tl-tip { position: fixed; background: var(--panel); border: 1px solid var(--line); padding: 5px 11px; font-size: 11px; color: var(--ink); pointer-events: none; z-index: 50; letter-spacing: .08em; white-space: nowrap }
+.tl-tip.hidden { display: none }

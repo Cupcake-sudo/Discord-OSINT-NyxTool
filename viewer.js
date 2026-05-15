@@ -192,7 +192,7 @@ function filterByIntel(items, category) {
   });
 }
 
-function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData) {
+function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData, timelineData) {
   page = page || 0;
   const isMentions = mode === 'mentions';
   let allItems     = (isMentions ? data.mentions : data.messages) || [];
@@ -306,6 +306,21 @@ function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData) {
   const layout = '<div class="layout' + (rank ? ' has-rank' : '') + '" id="msg-layout"><main id="main-feed">' + sectionParts.join('\n') + '</main>' + rank + '</div>' +
     (hasMentionsFeed ? '<div class="layout' + (mentionRankHtml ? ' has-rank' : '') + ' hidden" id="mention-layout"><main id="mention-feed">' + mentionFeedHtml + '</main>' + mentionRankHtml + '</div>' : '');
 
+  let tlHtml = '';
+  let tlBtn  = '';
+  if (timelineData && timelineData.buckets && timelineData.buckets.length) {
+    const first = timelineData.buckets[0].month;
+    const last  = timelineData.buckets[timelineData.buckets.length - 1].month;
+    tlHtml = '<div id="timeline-section" class="hidden">' +
+      '<div class="tl-meta">' +
+      '<span>activity timeline  ·  ' + escapeHtml(first) + ' → ' + escapeHtml(last) + '</span>' +
+      '<span>' + timelineData.buckets.length + ' months  ·  ' + timelineData.total + ' messages</span>' +
+      '</div>' +
+      '<div class="tl-scroll"><canvas id="tl-canvas"></canvas></div>' +
+      '</div>';
+    tlBtn = '<button class="fbtn" data-main="timeline">Timeline</button>';
+  }
+
   let hmHtml = '';
   let hmBtn  = '';
   if (heatmapData && heatmapData.buckets && heatmapData.buckets.length) {
@@ -340,6 +355,7 @@ function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData) {
     <button class="fbtn" data-main="files">Files</button>
     ${mentionsTabBtn}
     ${hmBtn}
+    ${tlBtn}
   </div>
   <div class="sub-row" id="sub-row">
     <span class="label">Type</span>
@@ -366,7 +382,8 @@ function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData) {
 </div>
 <script>
 document.addEventListener('DOMContentLoaded',function(){
-  var INTEL = ${JSON.stringify(INTEL_WORDLISTS)};
+  var INTEL   = ${JSON.stringify(INTEL_WORDLISTS)};
+  var TL_DATA = ${JSON.stringify(timelineData ? timelineData.buckets : [])};
 
   var main = 'all';
   var sub  = 'all';
@@ -407,6 +424,104 @@ document.addEventListener('DOMContentLoaded',function(){
       });
       var head = card.querySelector('.msg-head');
       if (head) head.appendChild(wrap);
+    });
+  }
+
+  function drawTimeline() {
+    if (!TL_DATA || !TL_DATA.length) return;
+    var canvas = document.getElementById('tl-canvas');
+    if (!canvas || canvas.dataset.drawn) return;
+    canvas.dataset.drawn = '1';
+
+    var BAR_W = 14, GAP = 3, STEP = BAR_W + GAP;
+    var TOP_PAD = 26, CHART_H = 160, LABEL_H = 26;
+    var H = TOP_PAD + CHART_H + LABEL_H;
+    var W = Math.max(TL_DATA.length * STEP, 300);
+    var dpr = window.devicePixelRatio || 1;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+
+    var ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+
+    var max = 0, total = 0;
+    TL_DATA.forEach(function(b) { if (b.count > max) max = b.count; total += b.count; });
+    var avg = total / TL_DATA.length;
+
+    function lerp(a, b, t) { return Math.round(a + (b - a) * t); }
+    function barColor(count) {
+      if (count === 0) return '#1a2029';
+      var t = count / max;
+      return 'rgb(' + lerp(0x2d, 0xa7, t) + ',' + lerp(0x1f, 0x8b, t) + ',' + lerp(0x5e, 0xfa, t) + ')';
+    }
+
+    ctx.fillStyle = '#0e1116';
+    ctx.fillRect(0, 0, W, H);
+
+    if (max > 0) {
+      var avgY = TOP_PAD + CHART_H - Math.round(avg / max * CHART_H);
+      ctx.strokeStyle = '#2a3347';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([2, 4]);
+      ctx.beginPath(); ctx.moveTo(0, avgY); ctx.lineTo(W, avgY); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#374151';
+      ctx.font = '9px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('avg', W - 2, avgY - 3);
+    }
+
+    var prevYear = null;
+    TL_DATA.forEach(function(b, i) {
+      var x    = i * STEP;
+      var h    = max === 0 ? 1 : Math.max(1, Math.round(b.count / max * CHART_H));
+      var barY = TOP_PAD + CHART_H - h;
+      var year = b.month.slice(0, 4);
+
+      if (year !== prevYear) {
+        ctx.strokeStyle = '#1f2530';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, TOP_PAD);
+        ctx.lineTo(x, TOP_PAD + CHART_H + 5);
+        ctx.stroke();
+        ctx.fillStyle = '#6b7280';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(year, x + 1, H - 5);
+        prevYear = year;
+      }
+
+      ctx.fillStyle = barColor(b.count);
+      ctx.fillRect(x, barY, BAR_W, h);
+
+      if (max > 0 && b.count === max) {
+        ctx.fillStyle = '#c4b5fd';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        var labelY = barY - 5;
+        ctx.fillText(b.count, x + BAR_W / 2, labelY > TOP_PAD + 6 ? labelY : TOP_PAD + 6);
+      }
+    });
+
+    var tip = document.getElementById('tl-tip');
+    canvas.addEventListener('mousemove', function(e) {
+      var rect = canvas.getBoundingClientRect();
+      var idx  = Math.floor((e.clientX - rect.left) / STEP);
+      if (tip && idx >= 0 && idx < TL_DATA.length) {
+        var b = TL_DATA[idx];
+        tip.textContent = b.month + '  ·  ' + b.count + ' msg' + (b.count !== 1 ? 's' : '');
+        tip.style.left  = Math.min(e.clientX + 14, window.innerWidth - 170) + 'px';
+        tip.style.top   = (e.clientY - 36) + 'px';
+        tip.classList.remove('hidden');
+      } else if (tip) {
+        tip.classList.add('hidden');
+      }
+    });
+    canvas.addEventListener('mouseleave', function() {
+      if (tip) tip.classList.add('hidden');
     });
   }
 
@@ -495,19 +610,30 @@ document.addEventListener('DOMContentLoaded',function(){
       main = btn.dataset.main;
       document.querySelectorAll('.fbtn[data-main]').forEach(function(b) { b.classList.remove('active'); });
       btn.classList.add('active');
-      var subRow      = document.getElementById('sub-row');
-      var msgLayout   = document.getElementById('msg-layout');
+      var subRow        = document.getElementById('sub-row');
+      var msgLayout     = document.getElementById('msg-layout');
       var mentionLayout = document.getElementById('mention-layout');
-      var hmSection = document.getElementById('heatmap-section');
-      var intelRowEl = document.querySelector('.intel-row');
+      var hmSection     = document.getElementById('heatmap-section');
+      var tlSection     = document.getElementById('timeline-section');
+      var intelRowEl    = document.querySelector('.intel-row');
       if (main === 'heatmap') {
         if (msgLayout)     msgLayout.classList.add('hidden');
         if (mentionLayout) mentionLayout.classList.add('hidden');
         if (hmSection)     hmSection.classList.remove('hidden');
+        if (tlSection)     tlSection.classList.add('hidden');
         if (intelRowEl)    intelRowEl.style.display = 'none';
         if (subRow)        subRow.classList.remove('visible');
+      } else if (main === 'timeline') {
+        if (msgLayout)     msgLayout.classList.add('hidden');
+        if (mentionLayout) mentionLayout.classList.add('hidden');
+        if (hmSection)     hmSection.classList.add('hidden');
+        if (tlSection)     tlSection.classList.remove('hidden');
+        if (intelRowEl)    intelRowEl.style.display = 'none';
+        if (subRow)        subRow.classList.remove('visible');
+        drawTimeline();
       } else {
         if (hmSection)     hmSection.classList.add('hidden');
+        if (tlSection)     tlSection.classList.add('hidden');
         if (intelRowEl)    intelRowEl.style.display = '';
         if (main === 'mentions') {
           if (msgLayout)     msgLayout.classList.add('hidden');
@@ -633,7 +759,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
   const foot = '<div class="foot"><span>nyx · case archive</span><span class="nyx">(=^ ◕ω◕ ^=)</span></div>';
 
-  return head + '<div class="frame">' + '<div class="top">' + stamp + targetBlock + '</div>' + statsBlock + pagerBlock + filterBar + layout + hmHtml + (totalPages > 1 ? pagerBlock : '') + foot + '</div>' + termsPanelHtml + '</body></html>';
+  return head + '<div class="frame">' + '<div class="top">' + stamp + targetBlock + '</div>' + statsBlock + pagerBlock + filterBar + layout + hmHtml + tlHtml + (totalPages > 1 ? pagerBlock : '') + foot + '</div>' + '<div id="tl-tip" class="tl-tip hidden"></div>' + termsPanelHtml + '</body></html>';
 }
 
 async function launchViewer(outDir, mode) {
@@ -658,6 +784,10 @@ async function launchViewer(outDir, mode) {
   const hmf = path.join(outDir, 'heatmap.json');
   if (fs.existsSync(hmf)) heatmapData = JSON.parse(fs.readFileSync(hmf, 'utf8'));
 
+  let timelineData = null;
+  const tlf = path.join(outDir, 'timeline.json');
+  if (fs.existsSync(tlf)) timelineData = JSON.parse(fs.readFileSync(tlf, 'utf8'));
+
   const server = http.createServer((req, res) => {
     const parsedUrl = new URL((req.url || '/'), 'http://localhost');
     const pathname  = decodeURIComponent(parsedUrl.pathname);
@@ -671,7 +801,7 @@ async function launchViewer(outDir, mode) {
     if (pathname === '/' || pathname === '/index.html') {
       const page  = parseInt(parsedUrl.searchParams.get('page') || '0', 10) || 0;
       const intel = parsedUrl.searchParams.get('intel') || null;
-      const html  = buildHTML(data, mode, page, intel, mentionsData, heatmapData);
+      const html  = buildHTML(data, mode, page, intel, mentionsData, heatmapData, timelineData);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
       res.end(html);
       return;
