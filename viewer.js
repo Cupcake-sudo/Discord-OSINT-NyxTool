@@ -114,9 +114,15 @@ function renderMessageCard(m, opts) {
   const avSrc     = id ? avatarUrl(id, av, discrim) : null;
   const dataHas    = messageDataHas(m);
   const senderAttr = opts.mode === 'mentions' ? ' data-sender="' + escapeHtml(id || '') + '"' : '';
+  const intelTags  = opts.intelRegexes ? tagMessageIntel(m.content || '', opts.intelRegexes) : '';
+  const intelAttr  = intelTags ? ' data-intel="' + escapeHtml(intelTags) + '"' : '';
+
+  const hasTypes  = dataHas.split(' ').filter(Boolean);
+  const hasFiles  = hasTypes.some(t => t === 'image' || t === 'video' || t === 'audio' || t === 'other');
+  const hasCls    = hasTypes.map(t => 'has-' + t).join(' ') + (hasFiles ? ' has-files' : '');
 
   const parts = [];
-  parts.push('<article class="msg" data-has="' + dataHas + '"' + senderAttr + '>');
+  parts.push('<article class="msg ' + hasCls + '" data-has="' + dataHas + '"' + senderAttr + intelAttr + '>');
   parts.push('  <div class="msg-head">');
   if (avSrc) {
     parts.push('    <img class="av" src="' + escapeHtml(avSrc) + '" alt="">');
@@ -184,6 +190,35 @@ function termRegex(t, flags) {
   return new RegExp(pre + esc + suf, flags || 'i');
 }
 
+// Pre-compile one combined regex per category (called once per buildHTML).
+function buildIntelRegexes() {
+  const out = {};
+  for (const [cat, terms] of Object.entries(INTEL_WORDLISTS)) {
+    if (!terms.length) continue;
+    const alts = terms
+      .slice()
+      .sort((a, b) => b.length - a.length)
+      .map(t => {
+        const esc = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pre = /^\w/.test(t) ? '\\b' : '';
+        const suf = /\w$/.test(t) ? '\\b' : '';
+        return pre + esc + suf;
+      })
+      .join('|');
+    out[cat] = new RegExp(alts, 'i');
+  }
+  return out;
+}
+
+function tagMessageIntel(text, regexes) {
+  if (!text || !text.trim()) return '';
+  const matched = [];
+  for (const [cat, re] of Object.entries(regexes)) {
+    if (re.test(text)) matched.push(cat);
+  }
+  return matched.join(' ');
+}
+
 function filterByIntel(items, category) {
   const terms = INTEL_WORDLISTS[category] || [];
   return items.filter((m) => {
@@ -212,6 +247,8 @@ function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData, tim
     ? avatarUrl(data.userId, data.targetAvatar, null)
     : avatarUrl(data.userId, null, null);
 
+  const intelRegexes = buildIntelRegexes();
+
   const sectionParts = [];
   for (const server of Object.keys(grouped).sort()) {
     sectionParts.push('<section class="srv"><h2>' + escapeHtml(server) + '</h2>');
@@ -224,6 +261,7 @@ function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData, tim
           targetId:     data.userId,
           targetTag:    data.username,
           targetAvatar: data.targetAvatar,
+          intelRegexes,
         }));
       }
       sectionParts.push('</div>');
@@ -243,7 +281,7 @@ function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData, tim
         const list = mg[sv][ch];
         mp.push('<div class="chan"><div class="chan-head"><span class="ch">' + escapeHtml(ch) + '</span><span class="cn">' + list.length + ' mention' + (list.length === 1 ? '' : 's') + '</span></div>');
         for (const m of list) {
-          mp.push(renderMessageCard(m, { mode: 'mentions', targetId: data.userId, targetTag: data.username, targetAvatar: data.targetAvatar }));
+          mp.push(renderMessageCard(m, { mode: 'mentions', targetId: data.userId, targetTag: data.username, targetAvatar: data.targetAvatar, intelRegexes }));
         }
         mp.push('</div>');
       }
@@ -395,7 +433,7 @@ function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData, tim
     hmBtn = '<button class="fbtn" data-main="heatmap">Heatmap</button>';
   }
 
-  const wordsBtn = '<button class="fbtn" id="terms-toggle" style="margin-left:auto">⚙ words</button>';
+  const wordsBtn = '<button class="fbtn" id="terms-toggle">⚙ words</button>';
 
   const mentionsTabBtn = hasMentionsFeed
     ? '<button class="fbtn" data-main="mentions">Mentions <span style="opacity:.5;font-size:10px">' + (mentionsData.mentions || []).length + '</span></button>'
@@ -411,6 +449,7 @@ function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData, tim
     ${mentionsTabBtn}
     ${hmBtn}
     ${tlBtn}
+    <div class="search-wrap"><input class="search-input" id="msg-search" type="text" placeholder="search messages…" autocomplete="off" spellcheck="false"></div>
   </div>
   <div class="sub-row" id="sub-row">
     <span class="label">Type</span>
@@ -422,7 +461,6 @@ function buildHTML(data, mode, page, intelFilter, mentionsData, heatmapData, tim
   </div>
   <div class="intel-row">
     <span class="label">OSINT Intel</span>
-    <button class="fbtn" data-intel="location">Location<span class="cnt"></span></button>
     <button class="fbtn" data-intel="economics">Economics<span class="cnt"></span></button>
     <button class="fbtn" data-intel="identity">Identity<span class="cnt"></span></button>
     <button class="fbtn" data-intel="social">Social<span class="cnt"></span></button>
@@ -440,8 +478,9 @@ document.addEventListener('DOMContentLoaded',function(){
   var INTEL   = ${JSON.stringify(INTEL_WORDLISTS)};
   var TL_DATA = ${JSON.stringify(timelineData ? timelineData.buckets : [])};
 
-  var main = 'all';
-  var sub  = 'all';
+  var _urlP = new URLSearchParams(window.location.search);
+  var main  = _urlP.get('main') || 'all';
+  var sub   = _urlP.get('sub')  || 'all';
   var intel = null;
 
   var disabledTerms = new Set();
@@ -588,26 +627,42 @@ document.addEventListener('DOMContentLoaded',function(){
   }
 
   function scanIntel() {
-    document.querySelectorAll('.msg').forEach(function(card) {
-      var body = card.querySelector('.body');
-      var text = body ? body.textContent.toLowerCase() : '';
-      var matched = [];
-      Object.keys(INTEL).forEach(function(cat) {
-        var terms = getActiveIntel(cat);
-        for (var i = 0; i < terms.length; i++) {
-          if (mkre(terms[i].toLowerCase()).test(text)) { matched.push(cat); break; }
-        }
-      });
-      card.dataset.intel = matched.join(' ');
-    });
+    // intel tags pre-computed server-side; just tally counts and render badges
     Object.keys(INTEL).forEach(function(cat) {
       var btn = document.querySelector('.fbtn[data-intel="' + cat + '"]');
       if (!btn) return;
       var count = document.querySelectorAll('.msg[data-intel~="' + cat + '"]').length;
       var cnt = btn.querySelector('.cnt');
       if (cnt) cnt.textContent = count ? ' ' + count : '';
+      btn.classList.toggle('fbtn-zero', count === 0);
     });
     addIntelBadges();
+  }
+
+  // shared visibility check (used when search is active)
+  function msgVisible(c) {
+    if (c.classList.contains('search-hide')) return false;
+    if (main === 'all') return true;
+    if (main === 'messages') return c.classList.contains('has-text');
+    if (main === 'files') return sub === 'all' ? c.classList.contains('has-files') : c.classList.contains('has-' + sub);
+    return true;
+  }
+
+  // precompute channel/server visibility for every filter combo once at load
+  var _pre = {};
+  function _buildPre() {
+    var msgs = document.querySelectorAll('#msg-layout .msg');
+    ['all:all','messages:all','files:all','files:image','files:video','files:audio','files:other'].forEach(function(k) {
+      var sp = k.split(':'), m = sp[0], s = sp[1];
+      var cv = new Set(), sv = new Set();
+      msgs.forEach(function(c) {
+        var ok = m === 'all' ||
+          (m === 'messages' && c.classList.contains('has-text')) ||
+          (m === 'files' && (s === 'all' ? c.classList.contains('has-files') : c.classList.contains('has-' + s)));
+        if (ok) { cv.add(c.parentElement); sv.add(c.parentElement.parentElement); }
+      });
+      _pre[k] = { cv: cv, sv: sv };
+    });
   }
 
   function highlightIntel(cat) {
@@ -634,30 +689,26 @@ document.addEventListener('DOMContentLoaded',function(){
   }
 
   function applyFilter() {
-    document.querySelectorAll('.msg').forEach(function(c) {
-      var has       = c.dataset.has   ? c.dataset.has.split(' ')   : [];
-      var intelTags = c.dataset.intel ? c.dataset.intel.split(' ') : [];
-      var typeOk = false;
-      if (main === 'all') {
-        typeOk = true;
-      } else if (main === 'messages') {
-        typeOk = has.indexOf('text') > -1;
-      } else if (main === 'files') {
-        var fileTypes = ['image','video','audio','other'];
-        var hasFile = has.some(function(t) { return fileTypes.indexOf(t) > -1; });
-        typeOk = sub === 'all' ? hasFile : has.indexOf(sub) > -1;
-      }
-      var intelOk = !intel || intelTags.indexOf(intel) > -1;
-      c.classList.toggle('hidden', !(typeOk && intelOk));
-    });
-    document.querySelectorAll('.chan').forEach(function(ch) {
-      var vis = ch.querySelectorAll('.msg:not(.hidden)').length > 0;
-      ch.classList.toggle('hidden', !vis);
-    });
-    document.querySelectorAll('.srv').forEach(function(sv) {
-      var vis = sv.querySelectorAll('.chan:not(.hidden)').length > 0;
-      sv.classList.toggle('hidden', !vis);
-    });
+    var layout = document.getElementById('msg-layout');
+    if (layout) { layout.dataset.filter = main; layout.dataset.sub = sub; }
+
+    var searchEl_ = document.getElementById('msg-search');
+    var searchActive = searchEl_ && !!searchEl_.value.trim();
+    var key = (main || 'all') + ':' + (sub || 'all');
+    var pre = !searchActive && _pre[key];
+
+    var cv, sv;
+    if (pre) {
+      cv = pre.cv; sv = pre.sv;
+    } else {
+      cv = new Set(); sv = new Set();
+      document.querySelectorAll('#msg-layout .msg').forEach(function(c) {
+        if (msgVisible(c)) { cv.add(c.parentElement); sv.add(c.parentElement.parentElement); }
+      });
+    }
+
+    document.querySelectorAll('#msg-layout .chan').forEach(function(ch) { ch.classList.toggle('hidden', !cv.has(ch)); });
+    document.querySelectorAll('#msg-layout .srv').forEach(function(sv_) { sv_.classList.toggle('hidden', !sv.has(sv_)); });
   }
 
   document.querySelectorAll('.fbtn[data-main]').forEach(function(btn) {
@@ -724,7 +775,45 @@ document.addEventListener('DOMContentLoaded',function(){
         params.set('intel', cat);
         params.delete('page');
       }
+      if (main && main !== 'all') params.set('main', main);
+      if (sub  && sub  !== 'all') params.set('sub', sub);
       window.location.search = params.toString();
+    });
+  });
+
+  _buildPre();
+
+  // restore filter state from URL params
+  if (main !== 'all') {
+    document.querySelectorAll('.fbtn[data-main]').forEach(function(b) { b.classList.remove('active'); });
+    var _mb = document.querySelector('.fbtn[data-main="' + main + '"]');
+    if (_mb) _mb.classList.add('active');
+    var _subRow = document.getElementById('sub-row');
+    if (main === 'files' && _subRow) _subRow.classList.add('visible');
+    var _intelRowEl = document.querySelector('.intel-row');
+    if ((main === 'heatmap' || main === 'timeline') && _intelRowEl) _intelRowEl.style.display = 'none';
+  }
+  if (sub !== 'all') {
+    document.querySelectorAll('.fbtn[data-sub]').forEach(function(b) { b.classList.remove('active'); });
+    var _sb = document.querySelector('.fbtn[data-sub="' + sub + '"]');
+    if (_sb) _sb.classList.add('active');
+  }
+  if (main === 'files' || main === 'messages') {
+    var _layout = document.getElementById('msg-layout');
+    if (_layout) { _layout.dataset.filter = main; _layout.dataset.sub = sub; }
+    applyFilter();
+  }
+
+  // intercept pager links to preserve filter state across pages
+  document.querySelectorAll('a.pbtn').forEach(function(a) {
+    a.addEventListener('click', function(e) {
+      e.preventDefault();
+      var url = new URL(a.href, window.location.href);
+      if (main && main !== 'all') url.searchParams.set('main', main);
+      else url.searchParams.delete('main');
+      if (sub && sub !== 'all') url.searchParams.set('sub', sub);
+      else url.searchParams.delete('sub');
+      window.location.href = url.toString();
     });
   });
 
@@ -796,19 +885,67 @@ document.addEventListener('DOMContentLoaded',function(){
       ['#main-feed','#mention-feed'].forEach(function(sel) {
         var feed = document.querySelector(sel);
         if (!feed) return;
+        var chanVis = new Set();
+        var srvVis  = new Set();
         feed.querySelectorAll('.msg').forEach(function(c) {
-          var sender = c.dataset.sender;
-          c.classList.toggle('hidden', filter !== null && sender !== filter);
+          var show = filter === null || c.dataset.sender === filter;
+          c.classList.toggle('hidden', !show);
+          if (show) { chanVis.add(c.parentElement); srvVis.add(c.parentElement.parentElement); }
         });
         feed.querySelectorAll('.chan').forEach(function(ch) {
-          ch.classList.toggle('hidden', !ch.querySelectorAll('.msg:not(.hidden)').length);
+          ch.classList.toggle('hidden', !chanVis.has(ch));
         });
         feed.querySelectorAll('.srv').forEach(function(sv) {
-          sv.classList.toggle('hidden', !sv.querySelectorAll('.chan:not(.hidden)').length);
+          sv.classList.toggle('hidden', !srvVis.has(sv));
         });
       });
     });
   });
+
+  // live message search
+  var searchEl = document.getElementById('msg-search');
+  var searchTimer = null;
+  if (searchEl) {
+    searchEl.addEventListener('input', function() {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(function() {
+        var q = searchEl.value.trim().toLowerCase();
+        var chanVis = new Set();
+        var srvVis  = new Set();
+        document.querySelectorAll('.msg').forEach(function(c) {
+          c.classList.toggle('search-hide', !!q && c.textContent.toLowerCase().indexOf(q) === -1);
+          if (msgVisible(c)) { chanVis.add(c.parentElement); srvVis.add(c.parentElement.parentElement); }
+        });
+        document.querySelectorAll('.chan').forEach(function(ch) { ch.classList.toggle('hidden', !chanVis.has(ch)); });
+        document.querySelectorAll('.srv').forEach(function(sv) { sv.classList.toggle('hidden', !srvVis.has(sv)); });
+      }, 180);
+    });
+  }
+
+  // keyboard arrow-key page navigation
+  document.addEventListener('keydown', function(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+      var links = document.querySelectorAll('a.pbtn');
+      links.forEach(function(a) {
+        if (e.key === 'ArrowLeft'  && a.textContent.indexOf('prev') > -1) a.click();
+        if (e.key === 'ArrowRight' && a.textContent.indexOf('next') > -1) a.click();
+      });
+    }
+  });
+
+  // back-to-top button
+  var backTop = document.createElement('button');
+  backTop.className = 'back-top';
+  backTop.textContent = '↑ top';
+  document.body.appendChild(backTop);
+  window.addEventListener('scroll', function() {
+    backTop.classList.toggle('visible', window.scrollY > 500);
+  }, { passive: true });
+  backTop.addEventListener('click', function() {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
 });
 </script>`;
 
